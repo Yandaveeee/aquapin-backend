@@ -1,8 +1,8 @@
 import React from 'react';
-import PondMapperScreen from './src/screens/PondMapperScreen';
+import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
   return (
-    <PondMapperScreen />
+    <AppNavigator />
   );
 }
