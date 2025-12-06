@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, Button, Alert, TextInput } from 'react-native';
+import { StyleSheet, View, Text, Button, Alert, TextInput, TouchableOpacity } from 'react-native';
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker'; // Camera Library
 import client from '../api/client'; 
 
 export default function PondMapperScreen() {
@@ -10,8 +11,9 @@ export default function PondMapperScreen() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [savedPonds, setSavedPonds] = useState([]);
   
-  // NEW: State for the custom name
+  // Form State
   const [pondName, setPondName] = useState('');
+  const [pondImage, setPondImage] = useState(null); // Stores the photo string
 
   // 1. Fetch Ponds on Load
   const fetchPonds = async () => {
@@ -46,35 +48,80 @@ export default function PondMapperScreen() {
     setCoordinates([...coordinates, e.nativeEvent.coordinate]);
   };
 
-  // 2. Updated Save Logic
+  // 2. CAMERA FUNCTION (Moved outside savePond so buttons can see it)
+  const takePhoto = async () => {
+    // A. Ask Permission
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    if (permissionResult.granted === false) {
+      Alert.alert("Permission Refused", "You need to allow camera access.");
+      return;
+    }
+
+    // B. Open Camera
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.3, // Low quality to keep DB happy
+      base64: true, // We need the text string
+    });
+
+    if (!result.canceled) {
+      setPondImage(result.assets[0].base64);
+      Alert.alert("Photo Taken!", "Image attached successfully.");
+    }
+  };
+
+  // 3. SAVE LOGIC
   const savePond = async () => {
     if (coordinates.length < 3) {
-      Alert.alert("Error", "Draw at least 3 corners on the map.");
+      Alert.alert("Error", "Draw at least 3 corners.");
       return;
     }
     
-    // NEW: Validation to ensure name is not empty
     if (!pondName.trim()) {
-      Alert.alert("Missing Name", "Please give this pond a name (e.g., 'North Pond').");
+      Alert.alert("Missing Name", "Please name this pond.");
       return;
     }
 
     try {
+      // A. Get Address
+      let addressString = "Unknown Location";
+      const firstPoint = coordinates[0];
+      const addressList = await Location.reverseGeocodeAsync({ 
+          latitude: firstPoint.latitude, 
+          longitude: firstPoint.longitude 
+      });
+
+      if (addressList.length > 0) {
+        const addr = addressList[0];
+        addressString = `${addr.city || addr.subregion}, ${addr.region || addr.country}`;
+      }
+
+      console.log("Detected Address:", addressString);
+
+      // B. Send to Backend
       const payload = {
-        name: pondName, // <--- SEND THE CUSTOM NAME HERE
-        coordinates: coordinates.map(c => [c.latitude, c.longitude])
+        name: pondName,
+        location_desc: addressString,
+        coordinates: coordinates.map(c => [c.latitude, c.longitude]),
+        image_base64: pondImage // Send the photo
       };
 
       const response = await client.post('/api/ponds/', payload);
       const area = response.data.area_sqm;
       
-      Alert.alert("Success", `Saved "${pondName}"!\nSize: ${area} sqm`);
+      Alert.alert(
+          "Success", 
+          `Saved: ${pondName}\nLocation: ${addressString}\nSize: ${area} sqm`
+      );
       
-      // Reset everything
+      // C. Reset Form
       setCoordinates([]);
-      setPondName(''); // Clear the name box
+      setPondName('');
+      setPondImage(null);
       setIsDrawing(false);
-      fetchPonds(); // Refresh map to show new color
+      fetchPonds();
 
     } catch (error) {
       console.error(error);
@@ -90,7 +137,11 @@ export default function PondMapperScreen() {
           provider={PROVIDER_GOOGLE}
           region={region}
           onPress={handleMapPress}
-          mapType="satellite"
+          mapType="hybrid"
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          followsUserLocation={true}
+          showsCompass={true}
         >
           {/* Saved Ponds */}
           {savedPonds.map((pond) => (
@@ -117,24 +168,32 @@ export default function PondMapperScreen() {
         <Text style={{textAlign:'center', marginTop: 50}}>Locating...</Text>
       )}
 
-      {/* 3. Updated Controls with Input Box */}
       <View style={styles.controls}>
         {!isDrawing ? (
           <Button title=" + Add New Pond " onPress={() => setIsDrawing(true)} color="#007AFF" />
         ) : (
           <View style={styles.formContainer}>
-            <Text style={styles.instruction}>Tap the map to draw corners</Text>
+            <Text style={styles.instruction}>Tap map to draw • Enter Name • Attach Photo</Text>
             
-            {/* NEW: Input Box */}
             <TextInput 
                 style={styles.input}
-                placeholder="Enter Pond Name (e.g. North Sector)"
+                placeholder="Pond Name (e.g. North Sector)"
                 value={pondName}
                 onChangeText={setPondName}
             />
 
+            {/* CAMERA BUTTON */}
+            <TouchableOpacity 
+                onPress={takePhoto} 
+                style={{backgroundColor: pondImage ? '#e8f5e9' : '#eee', padding: 10, borderRadius: 8, marginBottom: 10, alignItems: 'center'}}
+            >
+                <Text style={{color: pondImage ? 'green' : 'black'}}>
+                    {pondImage ? "✅ Photo Attached (Retake?)" : "📷 Attach Photo"}
+                </Text>
+            </TouchableOpacity>
+
             <View style={styles.buttons}>
-                <Button title="Cancel" onPress={() => {setIsDrawing(false); setCoordinates([]); setPondName('')}} color="red" />
+                <Button title="Cancel" onPress={() => {setIsDrawing(false); setCoordinates([]); setPondName(''); setPondImage(null)}} color="red" />
                 <Button title="Save" onPress={savePond} color="green" />
             </View>
           </View>
@@ -154,35 +213,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
-  // New Styles for the Input Box Container
   formContainer: {
     backgroundColor: 'white',
     padding: 15,
     borderRadius: 15,
     width: '100%',
-    elevation: 5, // Shadow for Android
-    shadowColor: '#000', // Shadow for iOS
+    elevation: 5,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
   },
-  instruction: {
-    textAlign: 'center',
-    color: '#666',
-    marginBottom: 10,
-    fontSize: 12
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9'
-  },
-  buttons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10
-  }
+  instruction: { textAlign: 'center', color: '#666', marginBottom: 10, fontSize: 12 },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 10, fontSize: 16, backgroundColor: '#f9f9f9' },
+  buttons: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 }
 });

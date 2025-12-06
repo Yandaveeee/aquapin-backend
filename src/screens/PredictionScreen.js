@@ -1,125 +1,160 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, FlatList } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import client from '../api/client';
 
 export default function PredictionScreen() {
+  const [mode, setMode] = useState('advisor'); // 'calculator' or 'advisor'
+
+  // --- CALCULATOR STATE ---
   const [area, setArea] = useState('');
   const [fry, setFry] = useState('');
-  const [days, setDays] = useState('120'); // Default 4 months
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [days, setDays] = useState('120');
+  const [calcResult, setCalcResult] = useState(null);
+  const [calcLoading, setCalcLoading] = useState(false);
 
+  // --- CHAT STATE ---
+  const [messages, setMessages] = useState([
+    { id: 1, text: "Hello! I am AquaBot. Ask me anything about fisheries/ponds", sender: 'bot' }
+  ]);
+  const [inputText, setInputText] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // --- HANDLER: CALCULATOR ---
   const handlePredict = async () => {
-    if (!area || !fry || !days) {
-      Alert.alert("Error", "Please fill all fields");
-      return;
-    }
-
-    setLoading(true);
-    setResult(null); // Hide previous result
-
+    if (!area || !fry || !days) return;
+    setCalcLoading(true);
     try {
-      const payload = {
-        fry_quantity: parseInt(fry),
-        days_cultured: parseInt(days),
-        area_sqm: parseFloat(area)
-      };
-
+      const payload = { fry_quantity: parseInt(fry), days_cultured: parseInt(days), area_sqm: parseFloat(area) };
       const response = await client.post('/api/predict/', payload);
-      setResult(response.data);
-      
+      setCalcResult(response.data);
     } catch (error) {
-      console.error(error);
-      Alert.alert("Error", "Prediction failed. Is the backend running?");
+      alert("Error calculating.");
     } finally {
-      setLoading(false);
+      setCalcLoading(false);
     }
   };
 
-  return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.header}>🌱 AI Yield Predictor</Text>
-      <Text style={styles.subHeader}>Plan your harvest before you start.</Text>
+  // --- HANDLER: CHAT ---
+  const sendMessage = async () => {
+    if (!inputText.trim()) return;
 
+    // 1. Add User Message
+    const newMsg = { id: Date.now(), text: inputText, sender: 'user' };
+    setMessages(prev => [...prev, newMsg]);
+    setInputText('');
+    setChatLoading(true);
+
+    try {
+      // 2. Send to Backend
+      const response = await client.post('/api/chat/', { message: newMsg.text });
+      
+      // 3. Add Bot Response
+      const botMsg = { id: Date.now() + 1, text: response.data.response, sender: 'bot' };
+      setMessages(prev => [...prev, botMsg]);
+
+    } catch (error) {
+      const errorMsg = { id: Date.now() + 1, text: "Sorry, I can't reach the server right now.", sender: 'bot' };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // --- RENDER FUNCTIONS ---
+  const renderCalculator = () => (
+    <ScrollView style={styles.content}>
       <Text style={styles.label}>Pond Area (sqm):</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 500" 
-        keyboardType="numeric"
-        value={area}
-        onChangeText={setArea}
-      />
+      <TextInput style={styles.input} placeholder="500" keyboardType="numeric" value={area} onChangeText={setArea} />
+      
+      <Text style={styles.label}>Fry Quantity:</Text>
+      <TextInput style={styles.input} placeholder="5000" keyboardType="numeric" value={fry} onChangeText={setFry} />
+      
+      <Text style={styles.label}>Days:</Text>
+      <TextInput style={styles.input} placeholder="120" keyboardType="numeric" value={days} onChangeText={setDays} />
 
-      <Text style={styles.label}>Fry Quantity (pcs):</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 5000" 
-        keyboardType="numeric"
-        value={fry}
-        onChangeText={setFry}
-      />
+      <Button title={calcLoading ? "Calculating..." : "Predict Yield"} onPress={handlePredict} />
 
-      <Text style={styles.label}>Days to Culture:</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 120" 
-        keyboardType="numeric"
-        value={days}
-        onChangeText={setDays}
-      />
-
-      <View style={styles.btnContainer}>
-        {loading ? (
-            <ActivityIndicator size="large" color="#007AFF" />
-        ) : (
-            <Button title="Analyze Potential Yield" onPress={handlePredict} />
-        )}
-      </View>
-
-      {/* RESULT CARD */}
-      {result && (
+      {calcResult && (
         <View style={styles.resultCard}>
-          <Text style={styles.resultTitle}>Prediction Results</Text>
-          
-          <View style={styles.row}>
-            <Text>Est. Harvest Weight:</Text>
-            <Text style={styles.value}>{result.predicted_yield_kg} kg</Text>
-          </View>
-
-          <View style={styles.row}>
-            <Text>Est. Gross Revenue:</Text>
-            <Text style={[styles.value, {color: 'green'}]}>
-                ₱{result.estimated_revenue.toLocaleString()}
-            </Text>
-          </View>
-          
-          <Text style={styles.disclaimer}>
-            *Based on historical data. Actual results may vary due to weather or disease.
-          </Text>
+          <Text style={styles.resultTitle}>Predicted Yield: {calcResult.predicted_yield_kg} kg</Text>
+          <Text style={{color:'green', fontWeight:'bold', fontSize:16}}>Est. Revenue: ₱{calcResult.estimated_revenue.toLocaleString()}</Text>
         </View>
       )}
     </ScrollView>
   );
+
+  const renderChat = () => (
+    <View style={{flex: 1}}>
+      <FlatList
+        data={messages}
+        keyExtractor={item => item.id.toString()}
+        style={{flex: 1, padding: 10}}
+        renderItem={({ item }) => (
+          <View style={[
+            styles.msgBubble, 
+            item.sender === 'user' ? styles.userBubble : styles.botBubble
+          ]}>
+            <Text style={item.sender === 'user' ? styles.userText : styles.botText}>{item.text}</Text>
+          </View>
+        )}
+      />
+      <View style={styles.chatInputContainer}>
+        <TextInput 
+            style={styles.chatInput} 
+            placeholder="Ask a question..." 
+            value={inputText}
+            onChangeText={setInputText} 
+        />
+        <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}>
+            <Ionicons name="send" size={20} color="white" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
+      {/* HEADER TABS */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+            style={[styles.tab, mode === 'advisor' && styles.activeTab]} 
+            onPress={() => setMode('advisor')}>
+            <Text style={[styles.tabText, mode === 'advisor' && styles.activeTabText]}>🤖 AI Advisor</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            style={[styles.tab, mode === 'calculator' && styles.activeTab]} 
+            onPress={() => setMode('calculator')}>
+            <Text style={[styles.tabText, mode === 'calculator' && styles.activeTabText]}>🧮 Calculator</Text>
+        </TouchableOpacity>
+      </View>
+
+      {mode === 'calculator' ? renderCalculator() : renderChat()}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 50 },
-  header: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', color: '#007AFF' },
-  subHeader: { textAlign: 'center', color: '#666', marginBottom: 20 },
-  label: { fontSize: 16, marginBottom: 5, marginTop: 10 },
-  input: { borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 5, fontSize: 16, backgroundColor: '#fff' },
-  btnContainer: { marginTop: 20 },
+  container: { flex: 1, backgroundColor: '#f5f5f5', paddingTop: 40 },
+  tabContainer: { flexDirection: 'row', backgroundColor: 'white', elevation: 2 },
+  tab: { flex: 1, padding: 15, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent' },
+  activeTab: { borderBottomColor: '#007AFF' },
+  tabText: { fontSize: 16, color: '#666' },
+  activeTabText: { color: '#007AFF', fontWeight: 'bold' },
   
-  resultCard: {
-    marginTop: 30,
-    padding: 20,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#BBDEFB'
-  },
-  resultTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  value: { fontWeight: 'bold', fontSize: 18 },
-  disclaimer: { marginTop: 15, fontSize: 12, fontStyle: 'italic', color: '#666' }
+  content: { padding: 20 },
+  label: { fontSize: 16, marginBottom: 5, marginTop: 10 },
+  input: { borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 5, backgroundColor: 'white', marginBottom: 15 },
+  resultCard: { marginTop: 20, padding: 20, backgroundColor: '#E3F2FD', borderRadius: 10, borderWidth: 1, borderColor: '#2196F3' },
+  resultTitle: { fontSize: 18, fontWeight: 'bold' },
+
+  // Chat Styles
+  msgBubble: { maxWidth: '80%', padding: 12, borderRadius: 15, marginBottom: 10 },
+  userBubble: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
+  botBubble: { alignSelf: 'flex-start', backgroundColor: '#E0E0E0' },
+  userText: { color: 'white' },
+  botText: { color: '#333' },
+  chatInputContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', borderTopWidth: 1, borderColor: '#eee' },
+  chatInput: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 20, paddingHorizontal: 15, marginRight: 10 },
+  sendBtn: { backgroundColor: '#007AFF', padding: 10, borderRadius: 50 }
 });
