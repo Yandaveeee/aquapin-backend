@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, Button, Alert, TextInput, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, Button, Alert, TextInput, TouchableOpacity, Keyboard, Image } from 'react-native';
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker'; // Camera Library
+import * as ImagePicker from 'expo-image-picker'; 
+import { Ionicons } from '@expo/vector-icons'; // For Search Icon
 import client from '../api/client'; 
 
 export default function PondMapperScreen() {
+  const mapRef = useRef(null); // <--- Reference to control the map
   const [region, setRegion] = useState(null);
   const [coordinates, setCoordinates] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -13,9 +15,11 @@ export default function PondMapperScreen() {
   
   // Form State
   const [pondName, setPondName] = useState('');
-  const [pondImage, setPondImage] = useState(null); // Stores the photo string
+  const [pondImage, setPondImage] = useState(null);
+  
+  // Search State
+  const [searchText, setSearchText] = useState('');
 
-  // 1. Fetch Ponds on Load
   const fetchPonds = async () => {
     try {
       const response = await client.get('/api/ponds/');
@@ -43,49 +47,70 @@ export default function PondMapperScreen() {
     })();
   }, []);
 
+  // --- NEW: SEARCH FUNCTION ---
+  const handleSearch = async () => {
+    if (!searchText.trim()) return;
+    Keyboard.dismiss(); // Hide keyboard
+
+    try {
+      // 1. Convert Text to Coordinates
+      const geocodedLocation = await Location.geocodeAsync(searchText);
+      
+      if (geocodedLocation.length > 0) {
+        const result = geocodedLocation[0];
+        const newRegion = {
+            latitude: result.latitude,
+            longitude: result.longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+        };
+
+        // 2. Fly the Map to that location
+        mapRef.current.animateToRegion(newRegion, 1000);
+        setRegion(newRegion);
+      } else {
+        Alert.alert("Not Found", "Could not find that location.");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Search failed. Check your internet.");
+    }
+  };
+
   const handleMapPress = (e) => {
     if (!isDrawing) return;
     setCoordinates([...coordinates, e.nativeEvent.coordinate]);
   };
 
-  // 2. CAMERA FUNCTION (Moved outside savePond so buttons can see it)
   const takePhoto = async () => {
-    // A. Ask Permission
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
     if (permissionResult.granted === false) {
       Alert.alert("Permission Refused", "You need to allow camera access.");
       return;
     }
-
-    // B. Open Camera
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 0.3, // Low quality to keep DB happy
-      base64: true, // We need the text string
+      quality: 0.3,
+      base64: true,
     });
-
     if (!result.canceled) {
       setPondImage(result.assets[0].base64);
       Alert.alert("Photo Taken!", "Image attached successfully.");
     }
   };
 
-  // 3. SAVE LOGIC
   const savePond = async () => {
     if (coordinates.length < 3) {
       Alert.alert("Error", "Draw at least 3 corners.");
       return;
     }
-    
     if (!pondName.trim()) {
       Alert.alert("Missing Name", "Please name this pond.");
       return;
     }
 
     try {
-      // A. Get Address
       let addressString = "Unknown Location";
       const firstPoint = coordinates[0];
       const addressList = await Location.reverseGeocodeAsync({ 
@@ -98,25 +123,18 @@ export default function PondMapperScreen() {
         addressString = `${addr.city || addr.subregion}, ${addr.region || addr.country}`;
       }
 
-      console.log("Detected Address:", addressString);
-
-      // B. Send to Backend
       const payload = {
         name: pondName,
         location_desc: addressString,
         coordinates: coordinates.map(c => [c.latitude, c.longitude]),
-        image_base64: pondImage // Send the photo
+        image_base64: pondImage
       };
 
       const response = await client.post('/api/ponds/', payload);
       const area = response.data.area_sqm;
       
-      Alert.alert(
-          "Success", 
-          `Saved: ${pondName}\nLocation: ${addressString}\nSize: ${area} sqm`
-      );
+      Alert.alert("Success", `Saved: ${pondName}\nSize: ${area} sqm`);
       
-      // C. Reset Form
       setCoordinates([]);
       setPondName('');
       setPondImage(null);
@@ -131,8 +149,25 @@ export default function PondMapperScreen() {
 
   return (
     <View style={styles.container}>
+      {/* SEARCH BAR (Only shows when NOT drawing) */}
+      {!isDrawing && (
+          <View style={styles.searchContainer}>
+            <TextInput 
+                style={styles.searchInput}
+                placeholder="Search location (e.g. Gonzaga)..."
+                value={searchText}
+                onChangeText={setSearchText}
+                onSubmitEditing={handleSearch}
+            />
+            <TouchableOpacity onPress={handleSearch} style={styles.searchBtn}>
+                <Ionicons name="search" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+      )}
+
       {region ? (
         <MapView
+          ref={mapRef} // <--- CONNECT REF HERE
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           region={region}
@@ -143,7 +178,6 @@ export default function PondMapperScreen() {
           followsUserLocation={true}
           showsCompass={true}
         >
-          {/* Saved Ponds */}
           {savedPonds.map((pond) => (
             <Polygon
               key={pond.id}
@@ -156,7 +190,6 @@ export default function PondMapperScreen() {
             />
           ))}
 
-          {/* Current Drawing */}
           {coordinates.length > 0 && (
             <Polygon coordinates={coordinates} fillColor="rgba(0, 200, 255, 0.5)" strokeColor="rgba(0, 0, 255, 0.5)" />
           )}
@@ -182,7 +215,6 @@ export default function PondMapperScreen() {
                 onChangeText={setPondName}
             />
 
-            {/* CAMERA BUTTON */}
             <TouchableOpacity 
                 onPress={takePhoto} 
                 style={{backgroundColor: pondImage ? '#e8f5e9' : '#eee', padding: 10, borderRadius: 8, marginBottom: 10, alignItems: 'center'}}
@@ -213,6 +245,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
+  
+  // Search Bar Styles
+  searchContainer: {
+    position: 'absolute',
+    top: 50, // Below status bar
+    left: 20,
+    right: 20,
+    zIndex: 10, // Float on top of map
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderRadius: 8,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowOffset: {width:0, height:2}
+  },
+  searchInput: {
+    flex: 1,
+    padding: 10,
+    fontSize: 16
+  },
+  searchBtn: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    justifyContent: 'center'
+  },
+
   formContainer: {
     backgroundColor: 'white',
     padding: 15,
