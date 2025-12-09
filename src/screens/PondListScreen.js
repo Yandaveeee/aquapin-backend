@@ -42,6 +42,23 @@ export default function PondListScreen() {
     fetchPonds().then(() => setRefreshing(false));
   }, []);
 
+  // Add cleanup
+useEffect(() => {
+  let isMounted = true;
+  
+  const fetchPonds = async () => {
+    try {
+      const response = await client.get('/api/ponds/');
+      if (isMounted) setPonds(response.data);
+    } catch (error) {
+      if (isMounted) console.error("Fetch error:", error);
+    }
+  };
+  
+  fetchPonds();
+  return () => { isMounted = false; };
+}, []);
+
   const getDaysActive = (dateString) => {
     if (!dateString) return 0;
     const stockDate = new Date(dateString);
