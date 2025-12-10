@@ -1,35 +1,44 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  View, 
-  Text, 
-  FlatList, 
-  StyleSheet, 
-  RefreshControl, 
-  TouchableOpacity, 
-  Alert, 
-  Image,
-  Modal, // <--- NEW: For the custom popup
-  ScrollView // <--- NEW: So you can scroll the details
+  View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Alert, Image, Modal, ScrollView 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import client from '../api/client';
+// --- IMPORT STORAGE HELPER ---
+import { storeData, getData } from '../utils/storage';
 
 export default function PondListScreen() {
   const [ponds, setPonds] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false); // Track connection status
   
-  // --- NEW: STATE FOR THE POPUP MODAL ---
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPond, setSelectedPond] = useState(null);
 
   const fetchPonds = async () => {
     try {
+      // 1. Try Network First
       const response = await client.get('/api/ponds/');
+      
+      // 2. If success, save to phone
       setPonds(response.data);
+      await storeData('PONDS_CACHE', response.data);
+      setIsOffline(false); // We are online
+      
     } catch (error) {
-      console.error("Fetch error:", error);
+      console.log("Network failed, switching to offline mode...");
+      
+      // 3. If fail, load from phone
+      const cachedPonds = await getData('PONDS_CACHE');
+      if (cachedPonds) {
+        setPonds(cachedPonds);
+        setIsOffline(true); // Show offline warning
+        Alert.alert("Offline Mode", "Showing saved data. Connect to server to update.");
+      } else {
+        Alert.alert("Error", "No internet and no saved data.");
+      }
     }
   };
 
@@ -42,23 +51,7 @@ export default function PondListScreen() {
     fetchPonds().then(() => setRefreshing(false));
   }, []);
 
-  // Add cleanup
-useEffect(() => {
-  let isMounted = true;
-  
-  const fetchPonds = async () => {
-    try {
-      const response = await client.get('/api/ponds/');
-      if (isMounted) setPonds(response.data);
-    } catch (error) {
-      if (isMounted) console.error("Fetch error:", error);
-    }
-  };
-  
-  fetchPonds();
-  return () => { isMounted = false; };
-}, []);
-
+  // ... (Helper logic stays the same) ...
   const getDaysActive = (dateString) => {
     if (!dateString) return 0;
     const stockDate = new Date(dateString);
@@ -68,58 +61,24 @@ useEffect(() => {
   };
 
   const generatePDF = async () => {
-    if (ponds.length === 0) {
-      Alert.alert("No Data", "There are no ponds to report.");
-      return;
-    }
+    if (ponds.length === 0) { Alert.alert("No Data", "No ponds to report."); return; }
     try {
       const tableRows = ponds.map(pond => {
         const days = getDaysActive(pond.last_stocked_at);
         const isReady = days >= 120;
         let statusText = pond.name.includes("(None)") ? "Inactive" : (isReady ? "Ready to Harvest" : `${days} Days Old`);
         let statusColor = isReady ? "#D32F2F" : "#333";
-
-        return `<tr>
-          <td>${pond.id}</td>
-          <td><strong>${pond.name}</strong></td>
-          <td>${pond.location_desc || "N/A"}</td>
-          <td>${pond.area_sqm} sqm</td>
-          <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
-        </tr>`;
+        return `<tr><td>${pond.id}</td><td><strong>${pond.name}</strong></td><td>${pond.location_desc || "N/A"}</td><td>${pond.area_sqm} sqm</td><td style="color:${statusColor}">${statusText}</td></tr>`;
       }).join('');
-
-      const html = `
-        <html>
-          <head>
-            <style>
-              body { font-family: 'Helvetica', sans-serif; padding: 30px; }
-              h1 { color: #007AFF; text-align: center; }
-              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-              th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-              th { background-color: #007AFF; color: white; }
-            </style>
-          </head>
-          <body>
-            <h1>AquaPin Farm Report</h1>
-            <p style="text-align:center;">Generated on: ${new Date().toLocaleDateString()}</p>
-            <table>
-              <tr><th>ID</th><th>Name</th><th>Location</th><th>Size</th><th>Status</th></tr>
-              ${tableRows}
-            </table>
-          </body>
-        </html>
-      `;
+      const html = `<html><head><style>body{font-family:'Helvetica';padding:20px;}h1{color:#007AFF;text-align:center;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{border:1px solid #ddd;padding:8px;}th{background-color:#007AFF;color:white;}</style></head><body><h1>AquaPin Farm Report</h1><table><tr><th>ID</th><th>Name</th><th>Location</th><th>Size</th><th>Status</th></tr>${tableRows}</table></body></html>`;
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-    } catch (error) {
-      Alert.alert("Error", "Could not generate report.");
-    }
+    } catch (error) { Alert.alert("Error", "Could not generate report."); }
   };
 
-  // --- OPEN MODAL FUNCTION ---
   const handlePondClick = (item) => {
-    setSelectedPond(item); // Save the clicked pond data
-    setModalVisible(true); // Show the window
+    setSelectedPond(item);
+    setModalVisible(true);
   };
 
   const renderItem = ({ item }) => {
@@ -128,16 +87,8 @@ useEffect(() => {
     const isInactive = item.name.includes("(None)");
 
     return (
-      <TouchableOpacity 
-        style={styles.card} 
-        onPress={() => handlePondClick(item)} // <--- CLICK TRIGGERS MODAL
-        activeOpacity={0.7}
-      >
-        <View style={[
-            styles.statusStrip, 
-            { backgroundColor: isInactive ? '#9E9E9E' : (isReady ? '#FF5252' : '#2196F3') } 
-        ]} />
-        
+      <TouchableOpacity style={styles.card} onPress={() => handlePondClick(item)} activeOpacity={0.7}>
+        <View style={[styles.statusStrip, { backgroundColor: isInactive ? '#9E9E9E' : (isReady ? '#FF5252' : '#2196F3') }]} />
         <View style={styles.cardContent}>
           <View style={styles.headerRow}>
             <Text style={styles.pondName}>{item.name}</Text>
@@ -149,31 +100,14 @@ useEffect(() => {
                 </View>
             )}
           </View>
-          
-          {/* Thumbnail Image */}
-          {item.image_base64 && (
-             <Image 
-                source={{ uri: `data:image/jpeg;base64,${item.image_base64}` }} 
-                style={styles.pondImage}
-                resizeMode="cover"
-             />
-          )}
-
+          {item.image_base64 && <Image source={{ uri: `data:image/jpeg;base64,${item.image_base64}` }} style={styles.pondImage} resizeMode="cover"/>}
           <View style={styles.locationRow}>
               <Ionicons name="location-sharp" size={14} color="#D32F2F" />
-              <Text style={styles.locationText} numberOfLines={1}>
-                  {item.location_desc || "No Address Provided"}
-              </Text>
+              <Text style={styles.locationText} numberOfLines={1}>{item.location_desc || "No Address Provided"}</Text>
           </View>
-
           <View style={styles.detailsRow}>
-             <View style={styles.detailItem}>
-                <Text style={styles.pondId}>ID: {item.id}</Text>
-             </View>
-             <View style={styles.detailItem}>
-                <Ionicons name="resize-outline" size={16} color="#666" />
-                <Text style={styles.detailText}>{item.area_sqm} sqm</Text>
-             </View>
+             <View style={styles.detailItem}><Text style={styles.pondId}>ID: {item.id}</Text></View>
+             <View style={styles.detailItem}><Ionicons name="resize-outline" size={16} color="#666" /><Text style={styles.detailText}>{item.area_sqm} sqm</Text></View>
           </View>
         </View>
       </TouchableOpacity>
@@ -182,6 +116,13 @@ useEffect(() => {
 
   return (
     <View style={styles.container}>
+      {/* OFFLINE BANNER */}
+      {isOffline && (
+        <View style={{backgroundColor: '#D32F2F', padding: 10, alignItems: 'center'}}>
+            <Text style={{color: 'white', fontWeight: 'bold'}}>⚠️ OFFLINE MODE - Showing Saved Data</Text>
+        </View>
+      )}
+
       <View style={styles.headerContainer}>
         <Text style={styles.header}>My Ponds</Text>
         <TouchableOpacity style={styles.exportBtn} onPress={generatePDF}>
@@ -205,60 +146,24 @@ useEffect(() => {
         />
       )}
 
-      {/* --- THE CUSTOM POPUP WINDOW (MODAL) --- */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
+      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView>
                 {selectedPond && (
                     <>
-                        {/* 1. Large Header Image */}
                         {selectedPond.image_base64 ? (
-                            <Image 
-                                // We ensure the data string is clean
-                                source={{ uri: `data:image/jpeg;base64,${selectedPond.image_base64.replace(/(\r\n|\n|\r)/gm, "")}` }} 
-                                style={styles.modalImage}
-                                resizeMode="contain" // Changed from cover to contain to see full image
-                            />
+                            <Image source={{ uri: `data:image/jpeg;base64,${selectedPond.image_base64}` }} style={styles.modalImage} resizeMode="contain" />
                         ) : (
-                            <View style={[styles.modalImage, {backgroundColor:'#eee', justifyContent:'center', alignItems:'center'}]}>
-                                <Ionicons name="image-outline" size={50} color="#ccc" />
-                                <Text style={{color:'#999'}}>No Photo Available</Text>
-                            </View>
+                            <View style={[styles.modalImage, {backgroundColor:'#eee', justifyContent:'center', alignItems:'center'}]}><Ionicons name="image-outline" size={50} color="#ccc" /><Text style={{color:'#999'}}>No Photo Available</Text></View>
                         )}
-
                         <View style={styles.modalBody}>
                             <Text style={styles.modalTitle}>{selectedPond.name}</Text>
                             <Text style={styles.modalId}>Pond ID: {selectedPond.id}</Text>
-
-                            <View style={styles.modalRow}>
-                                <Ionicons name="location" size={20} color="#D32F2F" />
-                                <Text style={styles.modalText}>{selectedPond.location_desc || "Unknown Location"}</Text>
-                            </View>
-
-                            <View style={styles.modalRow}>
-                                <Ionicons name="resize" size={20} color="#666" />
-                                <Text style={styles.modalText}>Area: {selectedPond.area_sqm} sqm</Text>
-                            </View>
-
-                            <View style={styles.modalRow}>
-                                <Ionicons name="calendar" size={20} color="#666" />
-                                <Text style={styles.modalText}>
-                                    Last Stocked: {selectedPond.last_stocked_at || "Not active"}
-                                </Text>
-                            </View>
-
-                            <TouchableOpacity 
-                                style={styles.closeButton} 
-                                onPress={() => setModalVisible(false)}
-                            >
-                                <Text style={styles.closeButtonText}>Close</Text>
-                            </TouchableOpacity>
+                            <View style={styles.modalRow}><Ionicons name="location" size={20} color="#D32F2F" /><Text style={styles.modalText}>{selectedPond.location_desc || "Unknown Location"}</Text></View>
+                            <View style={styles.modalRow}><Ionicons name="resize" size={20} color="#666" /><Text style={styles.modalText}>Area: {selectedPond.area_sqm} sqm</Text></View>
+                            <View style={styles.modalRow}><Ionicons name="calendar" size={20} color="#666" /><Text style={styles.modalText}>Last Stocked: {selectedPond.last_stocked_at || "Not active"}</Text></View>
+                            <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}><Text style={styles.closeButtonText}>Close</Text></TouchableOpacity>
                         </View>
                     </>
                 )}
@@ -266,11 +171,11 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
-
     </View>
   );
 }
 
+// ... (Copy Styles from previous step, or keep them if you didn't delete them)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa', paddingTop: 50 },
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 20 },
@@ -278,7 +183,6 @@ const styles = StyleSheet.create({
   exportBtn: { backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, elevation: 3 },
   exportText: { color:'white', fontWeight:'600', marginLeft: 5 },
   list: { paddingHorizontal: 20, paddingBottom: 30 },
-  
   card: { backgroundColor: 'white', borderRadius: 16, marginBottom: 16, flexDirection: 'row', overflow: 'hidden', elevation: 3 },
   statusStrip: { width: 6, height: '100%' },
   cardContent: { flex: 1, padding: 16 },
@@ -294,8 +198,6 @@ const styles = StyleSheet.create({
   detailText: { color: '#555', fontSize: 14, fontWeight: '500' },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 20, fontWeight: 'bold', color: '#888', marginTop: 15 },
-
-  // --- MODAL STYLES ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '90%', maxHeight: '80%', backgroundColor: 'white', borderRadius: 20, overflow: 'hidden', elevation: 10 },
   modalImage: { width: '100%', height: 300, backgroundColor: 'black' },

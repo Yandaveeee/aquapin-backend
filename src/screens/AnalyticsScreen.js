@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Dimensions, Alert } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import client from '../api/client';
+// 1. Import Storage Helper
+import { storeData, getData } from '../utils/storage'; 
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -9,13 +11,31 @@ export default function AnalyticsScreen() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false); // Track status
 
   const fetchAnalytics = async () => {
     try {
+      // 2. Try Online First
       const response = await client.get('/api/analytics/summary');
+      
+      // 3. Save to Cache
       setData(response.data);
+      await storeData('ANALYTICS_CACHE', response.data);
+      setIsOffline(false);
+
     } catch (error) {
-      console.error("Analytics Error:", error);
+      console.log("Network failed, loading cached analytics...");
+      
+      // 4. Load from Cache if Offline
+      const cachedData = await getData('ANALYTICS_CACHE');
+      if (cachedData) {
+        setData(cachedData);
+        setIsOffline(true);
+        // Optional: Show a small toast/alert
+        // Alert.alert("Offline", "Showing saved dashboard data.");
+      } else {
+        console.error("No internet and no cached analytics.");
+      }
     } finally {
       setLoading(false);
     }
@@ -37,7 +57,7 @@ export default function AnalyticsScreen() {
   if (!data) {
     return (
       <View style={styles.center}>
-        <Text>Could not load data. Check backend connection.</Text>
+        <Text>No data available offline.</Text>
         <Text style={{marginTop: 10, color: 'blue'}} onPress={fetchAnalytics}>Tap to Retry</Text>
       </View>
     );
@@ -48,9 +68,16 @@ export default function AnalyticsScreen() {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
+      {/* OFFLINE BANNER */}
+      {isOffline && (
+        <View style={{backgroundColor: '#D32F2F', padding: 8, alignItems: 'center', marginBottom: 10, borderRadius: 5}}>
+            <Text style={{color: 'white', fontWeight: 'bold', fontSize: 12}}>⚠️ OFFLINE MODE - Last Updated Data</Text>
+        </View>
+      )}
+
       <Text style={styles.header}>Farm Dashboard</Text>
 
-      {/* 1. KPI CARDS ROW 1 (Revenue & Harvest) */}
+      {/* KPI CARDS ROW 1 */}
       <View style={styles.kpiContainer}>
         <View style={[styles.card, {backgroundColor: '#E8F5E9'}]}>
             <Text style={styles.cardLabel}>Total Revenue</Text>
@@ -66,7 +93,7 @@ export default function AnalyticsScreen() {
         </View>
       </View>
 
-      {/* 2. KPI CARDS ROW 2 (Losses) */}
+      {/* KPI CARDS ROW 2 */}
       <View style={styles.kpiContainer}>
         <View style={[styles.card, {backgroundColor: '#FFEBEE'}]}>
             <Text style={styles.cardLabel}>Total Lost Qty</Text>
@@ -82,7 +109,7 @@ export default function AnalyticsScreen() {
         </View>
       </View>
 
-      {/* 3. AI RISK RECOMMENDATION */}
+      {/* RISK RECOMMENDATION */}
       <View style={styles.alertBox}>
         <Text style={styles.alertTitle}>⚠️ System Recommendation</Text>
         <Text style={styles.alertText}>
@@ -90,7 +117,7 @@ export default function AnalyticsScreen() {
         </Text>
       </View>
 
-      {/* 4. YEARLY CHART */}
+      {/* CHART */}
       <Text style={styles.chartTitle}>Yearly Harvest Trends</Text>
       
       {data.yearly_chart && data.yearly_chart.data && data.yearly_chart.data.length > 0 ? (
@@ -130,16 +157,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 50, backgroundColor: '#fff' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { fontSize: 28, fontWeight: 'bold', marginBottom: 20 },
-  
   kpiContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   card: { width: '48%', padding: 15, borderRadius: 12, alignItems: 'center', elevation: 2 },
   cardLabel: { fontSize: 13, color: '#555', marginBottom: 5 },
   cardValue: { fontSize: 16, fontWeight: 'bold' },
-
   alertBox: { backgroundColor: '#FFF3E0', padding: 15, borderRadius: 10, marginBottom: 20, borderLeftWidth: 5, borderLeftColor: '#FF9800' },
   alertTitle: { color: '#E65100', fontWeight: 'bold', marginBottom: 5 },
   alertText: { color: '#BF360C' },
-
   chartTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10, marginTop: 10 },
   chart: { marginVertical: 8, borderRadius: 16 },
   noDataBox: { height: 100, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 10 }
