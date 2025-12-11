@@ -11,7 +11,6 @@ import HarvestFormScreen from '../screens/HarvestFormScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import PondListScreen from '../screens/PondListScreen';
 import MortalityScreen from '../screens/MortalityScreen';
-import SettingsScreen from '../screens/SettingsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -43,10 +42,6 @@ export default function AppNavigator() {
             else if (route.name === 'Loss') {
               iconName = focused ? 'warning' : 'warning-outline';
             }
-            else if (route.name === 'Config') {
-              iconName = focused ? 'settings' : 'settings-outline';
-            }
-
             return <Ionicons name={iconName} size={size} color={color} />;
           },
           tabBarActiveTintColor: '#007AFF',
@@ -61,7 +56,6 @@ export default function AppNavigator() {
         <Tab.Screen name="Harvest" component={HarvestFormScreen} />
         <Tab.Screen name="Predict" component={PredictionScreen} />
         <Tab.Screen name="Loss" component={MortalityScreen} />
-        <Tab.Screen name="Config" component={SettingsScreen} />
 
       </Tab.Navigator>
     </NavigationContainer>
