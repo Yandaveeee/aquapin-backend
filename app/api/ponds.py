@@ -23,7 +23,11 @@ def get_all_ponds(db: Session = Depends(get_db)):
         # Convert PostGIS shape back to Coordinates
         try:
             shapely_poly = to_shape(pond.geometry)
-            coords = [[y, x] for x, y in shapely_poly.exterior.coords][:-1]
+            
+            # --- FIX IS HERE: Use (y, x) for Tuples, not [y, x] ---
+            coords = [(y, x) for x, y in shapely_poly.exterior.coords][:-1]
+            # ------------------------------------------------------
+            
         except Exception:
             coords = []
 
@@ -47,10 +51,7 @@ def get_all_ponds(db: Session = Depends(get_db)):
             area_sqm=pond.area_sqm,
             created_at=pond.created_at,
             last_stocked_at=stock_date,
-            
-            # --- THIS LINE WAS MISSING BEFORE! ---
             image_base64=pond.image_base64 
-            # -------------------------------------
         )
         pond_obj.coordinates = coords 
         results.append(pond_obj)
@@ -75,7 +76,7 @@ def create_pond(pond_data: PondCreate, db: Session = Depends(get_db)):
         new_pond = Pond(
             name=pond_data.name,
             location_desc=pond_data.location_desc,
-            image_base64=pond_data.image_base64, # Save image
+            image_base64=pond_data.image_base64, 
             geometry=from_shape(shapely_poly, srid=4326),
             area_sqm=0.0 
         )

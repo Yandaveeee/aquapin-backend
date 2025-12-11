@@ -13,7 +13,7 @@ class ChatResponse(BaseModel):
 
 # 1. SETUP GOOGLE GEMINI (The "Smart Brain")
 # PASTE YOUR API KEY HERE INSIDE THE QUOTES
-GOOGLE_API_KEY = "AIzaSyC9ZURLJFhUO7HvxvFctwReHnFzUSCeUns"
+GOOGLE_API_KEY = "AIzaSyAQLaqGh3Kz-09Yha-k1ICvKFuzEDohIlM"
 
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -54,9 +54,9 @@ def chat_with_aquabot(request: ChatRequest):
             response = model.generate_content(system_instruction)
             return {"response": response.text}
             
-        except Exception:
-            print("⚠️ Internet/API Error. Switching to Offline Mode.")
-            # If internet fails, code continues to Plan B below...
+        except Exception as e:  
+            print(f"❌ GOOGLE AI CRASHED: {e}") 
+            print("⚠️ Switching to Offline Mode.")
 
     # PLAN B: FALLBACK TO DICTIONARY (Offline)
     user_msg_lower = user_msg.lower()
