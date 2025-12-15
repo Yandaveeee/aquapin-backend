@@ -13,13 +13,13 @@ import {
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
-import { Ionicons } from "@expo/vector-icons"; // For Search Icon
+import { Ionicons } from "@expo/vector-icons"; 
 import client from "../api/client";
 // 1. IMPORT OFFLINE HELPERS
 import { isOnline, queueAction, getSmartData } from '../api/offline';
 
 export default function PondMapperScreen() {
-  const mapRef = useRef(null); // <--- Reference to control the map
+  const mapRef = useRef(null);
   const [region, setRegion] = useState(null);
   const [coordinates, setCoordinates] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -28,14 +28,11 @@ export default function PondMapperScreen() {
   // Form State
   const [pondName, setPondName] = useState("");
   const [pondImage, setPondImage] = useState(null);
-
-  // Search State
   const [searchText, setSearchText] = useState("");
 
-  // --- UPDATED: Works Offline ---
   const fetchPonds = async () => {
-    // We use the SAME cache key as the List Screen so they share data
-    const data = await getSmartData('PONDS_LIST', '/api/ponds/');
+    // 2. Use Smart Data (Cache + Network)
+    const data = await getSmartData('PONDS_LIST', () => client.get('/api/ponds/'));
     if (data) {
       setSavedPonds(data);
     }
@@ -59,21 +56,19 @@ export default function PondMapperScreen() {
     })();
   }, []);
 
-  // --- NEW: SEARCH FUNCTION ---
   const handleSearch = async () => {
     if (!searchText.trim()) return;
     
-    // Check connection for search
+    // 3. Search requires internet (Geocoding)
     const online = await isOnline();
     if (!online) {
         Alert.alert("Offline", "Search requires internet connection.");
         return;
     }
 
-    Keyboard.dismiss(); // Hide keyboard
+    Keyboard.dismiss(); 
 
     try {
-      // 1. Convert Text to Coordinates
       const geocodedLocation = await Location.geocodeAsync(searchText);
 
       if (geocodedLocation.length > 0) {
@@ -84,8 +79,6 @@ export default function PondMapperScreen() {
           latitudeDelta: 0.005,
           longitudeDelta: 0.005,
         };
-
-        // 2. Fly the Map to that location
         mapRef.current.animateToRegion(newRegion, 1000);
         setRegion(newRegion);
       } else {
@@ -104,7 +97,7 @@ export default function PondMapperScreen() {
   const takePhoto = async () => {
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
     if (permissionResult.granted === false) {
-      Alert.alert("Permission Refused", "You need to allow camera access.");
+      Alert.alert("Permission Refused");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -130,7 +123,7 @@ export default function PondMapperScreen() {
       return;
     }
 
-    // Check connection first
+    // 4. Check Connection
     const online = await isOnline();
     let addressString = "Pinned Location (Offline)";
 
@@ -166,7 +159,6 @@ export default function PondMapperScreen() {
       try {
         const response = await client.post("/api/ponds/", payload);
         const area = response.data.area_sqm;
-
         Alert.alert("Success", `Saved: ${pondName}\nSize: ${area} sqm`);
 
         setCoordinates([]);
@@ -184,10 +176,9 @@ export default function PondMapperScreen() {
         await queueAction("/api/ponds/", payload);
         Alert.alert(
           "Saved Offline ☁️",
-          "Pond map saved to device. Area size will be calculated when you Sync."
+          "Pond map saved locally. It will appear on the map after you Sync."
         );
 
-        // Cleanup locally
         setCoordinates([]);
         setPondName("");
         setPondImage(null);
@@ -200,7 +191,6 @@ export default function PondMapperScreen() {
 
   return (
     <View style={styles.container}>
-      {/* SEARCH BAR (Only shows when NOT drawing) */}
       {!isDrawing && (
         <View style={styles.searchContainer}>
           <TextInput
@@ -218,7 +208,7 @@ export default function PondMapperScreen() {
 
       {region ? (
         <MapView
-          ref={mapRef} // <--- CONNECT REF HERE
+          ref={mapRef}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           region={region}
@@ -236,7 +226,6 @@ export default function PondMapperScreen() {
                 latitude: c[0],
                 longitude: c[1],
               }))}
-              // FIX: Force green color for everyone
               fillColor="rgba(0, 255, 0, 0.4)"
               strokeColor="rgba(255,255,255,0.8)"
               strokeWidth={2}
@@ -297,7 +286,7 @@ export default function PondMapperScreen() {
               }}
             >
               <Text style={{ color: pondImage ? "green" : "black" }}>
-                {pondImage ? "✅ Photo Attached (Retake?)" : "📷 Attach Photo"}
+                {pondImage ? "✅ Photo Attached" : "📷 Attach Photo"}
               </Text>
             </TouchableOpacity>
 
@@ -331,14 +320,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
   },
-
-  // Search Bar Styles
   searchContainer: {
     position: "absolute",
-    top: 50, // Below status bar
+    top: 50,
     left: 20,
     right: 20,
-    zIndex: 10, // Float on top of map
+    zIndex: 10,
     flexDirection: "row",
     backgroundColor: "white",
     borderRadius: 8,
@@ -347,11 +334,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowOffset: { width: 0, height: 2 },
   },
-  searchInput: {
-    flex: 1,
-    padding: 10,
-    fontSize: 16,
-  },
+  searchInput: { flex: 1, padding: 10, fontSize: 16 },
   searchBtn: {
     backgroundColor: "#007AFF",
     padding: 10,
@@ -359,7 +342,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 8,
     justifyContent: "center",
   },
-
   formContainer: {
     backgroundColor: "white",
     padding: 15,

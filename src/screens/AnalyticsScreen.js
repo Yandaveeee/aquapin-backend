@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Dimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import client from '../api/client';
+// 1. IMPORT OFFLINE HELPERS
+import { getSmartData } from '../api/offline';
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -12,8 +14,11 @@ export default function AnalyticsScreen() {
 
   const fetchAnalytics = async () => {
     try {
-      const response = await client.get('/api/analytics/summary');
-      setData(response.data);
+      // 2. Use Smart Data to cache the analytics result
+      const result = await getSmartData('ANALYTICS_CACHE', () => client.get('/api/analytics/summary'));
+      if (result) {
+          setData(result);
+      }
     } catch (error) {
       console.error("Analytics Error:", error);
     } finally {
@@ -37,7 +42,7 @@ export default function AnalyticsScreen() {
   if (!data) {
     return (
       <View style={styles.center}>
-        <Text>Could not load data. Check connection.</Text>
+        <Text>No data available (Offline).</Text>
         <Text style={{marginTop: 10, color: 'blue'}} onPress={fetchAnalytics}>Tap to Retry</Text>
       </View>
     );
@@ -49,7 +54,7 @@ export default function AnalyticsScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.header}>Farm Dashboard</Text>
-
+      
       {/* KPI CARDS */}
       <View style={styles.kpiContainer}>
         <View style={[styles.card, {backgroundColor: '#E8F5E9'}]}>
@@ -81,7 +86,6 @@ export default function AnalyticsScreen() {
         </View>
       </View>
 
-      {/* RISK RECOMMENDATION */}
       <View style={styles.alertBox}>
         <Text style={styles.alertTitle}>⚠️ System Recommendation</Text>
         <Text style={styles.alertText}>
@@ -89,7 +93,6 @@ export default function AnalyticsScreen() {
         </Text>
       </View>
 
-      {/* CHART */}
       <Text style={styles.chartTitle}>Yearly Harvest Trends</Text>
       
       {data.yearly_chart && data.yearly_chart.data && data.yearly_chart.data.length > 0 ? (

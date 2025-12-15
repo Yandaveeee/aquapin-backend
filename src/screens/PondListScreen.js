@@ -3,19 +3,21 @@ import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Ale
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { getSmartData, syncData } from '../api/offline'; // <--- IMPORT THIS
+import client from '../api/client';
+// 1. IMPORT OFFLINE HELPERS
+import { getSmartData, syncData } from '../api/offline';
 
 export default function PondListScreen() {
   const [ponds, setPonds] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [syncing, setSyncing] = useState(false); // Loading state for sync
+  const [syncing, setSyncing] = useState(false); 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPond, setSelectedPond] = useState(null);
 
   // --- MODIFIED FETCH: Uses Cache if Offline ---
   const fetchPonds = async () => {
-    // Usage: getSmartData('CACHE_KEY_NAME', '/api/endpoint')
-    const data = await getSmartData('PONDS_LIST', '/api/ponds/');
+    // IMPORTANT: Pass the API call as a function: () => client.get(...)
+    const data = await getSmartData('PONDS_LIST', () => client.get('/api/ponds/'));
     if (data) {
       setPonds(data);
     }

@@ -9,26 +9,26 @@ export default function MortalityScreen() {
   const [activeStockings, setActiveStockings] = useState([]);
   const [selectedStockId, setSelectedStockId] = useState(null);
 
-  // Form State
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [qty, setQty] = useState('');
   const [kg, setKg] = useState('');
   const [cause, setCause] = useState('Flood');
   const [suggestion, setSuggestion] = useState(null);
 
-  // 1. Fetch Active Batches (Works Offline now!)
   useEffect(() => {
     fetchActiveStockings();
   }, []);
 
   const fetchActiveStockings = async () => {
     try {
-      // Use the SAME cache key 'ACTIVE_STOCK_CACHE' that Harvest uses
-      const data = await getSmartData('ACTIVE_STOCK_CACHE', '/api/stocking/active');
+      // 2. Use Smart Data (Same cache key as Harvest so data is consistent)
+      const data = await getSmartData('ACTIVE_STOCK_CACHE', () => client.get('/api/stocking/active'));
       
       if (data) {
         setActiveStockings(data);
-        if (data.length > 0) setSelectedStockId(data[0].id);
+        if (data.length > 0) {
+          setSelectedStockId(data[0].id);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -49,20 +49,17 @@ export default function MortalityScreen() {
         action_taken: "Reported via App"
     };
 
-    // 2. Check Connection
+    // 3. Check Connection
     const online = await isOnline();
 
     if (online) {
       // --- ONLINE MODE ---
       try {
         const response = await client.post('/api/mortality/', payload);
-        
         setSuggestion(response.data.solution);
         Alert.alert("Incident Recorded", "See recommendation below.");
-        
         setQty('');
         setKg('');
-        
       } catch (error) {
         console.log(error);
         Alert.alert("Error", "Could not save report.");
@@ -87,10 +84,7 @@ export default function MortalityScreen() {
       <Text style={styles.label}>Select Affected Batch:</Text>
       <View style={styles.pickerBox}>
         {activeStockings.length > 0 ? (
-            <Picker
-                selectedValue={selectedStockId}
-                onValueChange={(itemValue) => setSelectedStockId(itemValue)}
-            >
+            <Picker selectedValue={selectedStockId} onValueChange={(itemValue) => setSelectedStockId(itemValue)}>
                 {activeStockings.map((stock) => (
                     <Picker.Item key={stock.id} label={stock.label} value={stock.id} />
                 ))}
@@ -110,17 +104,13 @@ export default function MortalityScreen() {
             <Picker.Item label="Other" value="Unknown" />
         </Picker>
       </View>
-
       <Text style={styles.label}>Quantity Lost (pcs):</Text>
       <TextInput style={styles.input} placeholder="e.g. 1000" keyboardType="numeric" value={qty} onChangeText={setQty} />
-
       <Text style={styles.label}>Est. Weight Lost (kg):</Text>
       <TextInput style={styles.input} placeholder="e.g. 200" keyboardType="numeric" value={kg} onChangeText={setKg} />
-
       <View style={{marginTop: 20}}>
         <Button title="Report Loss" onPress={handleSave} color="#D32F2F" disabled={activeStockings.length === 0} />
       </View>
-
       {suggestion && (
         <View style={styles.card}>
             <Text style={{fontWeight:'bold', color: '#D32F2F', marginBottom: 5}}>🤖 System Recommendation:</Text>

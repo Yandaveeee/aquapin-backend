@@ -11,7 +11,6 @@ export default function StockingFormScreen() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); 
 
   const handleSave = async () => {
-    // 1. Validation
     if (!pondId || !quantity) {
       Alert.alert("Error", "Please fill in Pond ID and Quantity");
       return;
@@ -28,21 +27,21 @@ export default function StockingFormScreen() {
     const online = await isOnline();
 
     if (online) {
-        // --- ONLINE: Send to Server ---
+        // --- ONLINE MODE ---
         try {
           await client.post('/api/stocking/', payload);
           Alert.alert("Success", "Stocking Log Saved!");
-          setQuantity(''); // Clear form
+          setQuantity(''); 
         } catch (error) {
           console.error(error);
           Alert.alert("Error", "Could not save log. Check Pond ID.");
         }
     } else {
-        // --- OFFLINE: Queue It ---
+        // --- OFFLINE MODE ---
         try {
             await queueAction('/api/stocking/', payload);
-            Alert.alert("Saved Offline ☁️", "Stocking record saved to device. Don't forget to Sync later!");
-            setQuantity(''); // Clear form locally
+            Alert.alert("Saved Offline ☁️", "Stocking record saved to device. Sync later!");
+            setQuantity(''); 
         } catch (e) {
             Alert.alert("Error", "Could not save offline.");
         }
@@ -52,39 +51,14 @@ export default function StockingFormScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Stocking Record</Text>
-
       <Text style={styles.label}>Pond ID:</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 1" 
-        keyboardType="numeric"
-        value={pondId}
-        onChangeText={setPondId}
-      />
-
+      <TextInput style={styles.input} placeholder="e.g. 1" keyboardType="numeric" value={pondId} onChangeText={setPondId} />
       <Text style={styles.label}>Date (YYYY-MM-DD):</Text>
-      <TextInput 
-        style={styles.input} 
-        value={date}
-        onChangeText={setDate}
-      />
-
+      <TextInput style={styles.input} value={date} onChangeText={setDate} />
       <Text style={styles.label}>Fry Type:</Text>
-      <TextInput 
-        style={styles.input} 
-        value={fryType}
-        onChangeText={setFryType}
-      />
-
+      <TextInput style={styles.input} value={fryType} onChangeText={setFryType} />
       <Text style={styles.label}>Quantity (pcs):</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 5000" 
-        keyboardType="numeric"
-        value={quantity}
-        onChangeText={setQuantity}
-      />
-
+      <TextInput style={styles.input} placeholder="e.g. 5000" keyboardType="numeric" value={quantity} onChangeText={setQuantity} />
       <View style={styles.btnContainer}>
         <Button title="Save Record" onPress={handleSave} />
       </View>
