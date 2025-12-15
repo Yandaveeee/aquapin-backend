@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView } from 'react-native';
 import { Picker } from '@react-native-picker/picker'; // <--- Dropdown Library
 import client from '../api/client';
+// 1. IMPORT THE OFFLINE HELPERS
+import { isOnline, queueAction, getSmartData } from '../api/offline'; 
 
 export default function HarvestFormScreen() {
   // Lists for the Dropdown
@@ -15,16 +17,20 @@ export default function HarvestFormScreen() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
   // 1. Fetch "Active" Stockings (Fish still in water)
+  // --- UPDATED: Use Smart Data to work offline ---
   const fetchActiveStockings = async () => {
     try {
-      const response = await client.get('/api/stocking/active');
-      setActiveStockings(response.data);
+      // Use 'ACTIVE_STOCK_CACHE' key to save/load this list
+      const data = await getSmartData('ACTIVE_STOCK_CACHE', '/api/stocking/active');
       
-      // Auto-select the first item if available
-      if (response.data.length > 0) {
-        setSelectedStockId(response.data[0].id);
-      } else {
-        setSelectedStockId(null);
+      if (data) {
+        setActiveStockings(data);
+        // Auto-select the first item if available
+        if (data.length > 0) {
+          setSelectedStockId(data[0].id);
+        } else {
+          setSelectedStockId(null);
+        }
       }
     } catch (error) {
       console.error("Error fetching active stockings:", error);
@@ -47,33 +53,55 @@ export default function HarvestFormScreen() {
       return;
     }
 
-    try {
-      const payload = {
-        stocking_id: parseInt(selectedStockId),
-        harvest_date: date,
-        total_weight_kg: parseFloat(weight),
-        market_price_per_kg: parseFloat(price) || 0,
-        fish_size: size // <--- Sending the size to backend
-      };
+    const payload = {
+      stocking_id: parseInt(selectedStockId),
+      harvest_date: date,
+      total_weight_kg: parseFloat(weight),
+      market_price_per_kg: parseFloat(price) || 0,
+      fish_size: size // <--- Sending the size to backend
+    };
 
-      const response = await client.post('/api/harvest/', payload);
+    // --- UPDATED: Check Connection First ---
+    const online = await isOnline();
 
-      Alert.alert(
-        "✅ Harvest Recorded!", 
-        `Profit: ₱${response.data.revenue?.toLocaleString()}\nDays Cultured: ${response.data.days_cultured} days`
-      );
-      
-      // Reset Form & Refresh List
-      setWeight('');
-      setPrice('');
-      fetchActiveStockings(); // <--- Update list so the harvested batch disappears
+    if (online) {
+      // --- ONLINE MODE: Normal Behavior ---
+      try {
+        const response = await client.post('/api/harvest/', payload);
 
-    } catch (error) {
-      console.error(error);
-      if (error.response) {
-         Alert.alert("Error", JSON.stringify(error.response.data));
-      } else {
-         Alert.alert("Error", "Network Error");
+        Alert.alert(
+          "✅ Harvest Recorded!", 
+          `Profit: ₱${response.data.revenue?.toLocaleString()}\nDays Cultured: ${response.data.days_cultured} days`
+        );
+        
+        // Reset Form & Refresh List
+        setWeight('');
+        setPrice('');
+        fetchActiveStockings(); // <--- Update list so the harvested batch disappears
+
+      } catch (error) {
+        console.error(error);
+        if (error.response) {
+           Alert.alert("Error", JSON.stringify(error.response.data));
+        } else {
+           Alert.alert("Error", "Network Error");
+        }
+      }
+    } else {
+      // --- OFFLINE MODE: Queue It ---
+      try {
+        await queueAction('/api/harvest/', payload);
+        
+        Alert.alert(
+          "Saved Offline ☁️", 
+          "No internet connection. Your harvest has been saved to the device and will be uploaded when you sync."
+        );
+        
+        // Reset Form locally so user can continue working
+        setWeight('');
+        setPrice('');
+      } catch (e) {
+        Alert.alert("Error", "Could not save offline data.");
       }
     }
   };

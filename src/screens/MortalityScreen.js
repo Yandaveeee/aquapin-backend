@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView } from 'react-native';
 import { Picker } from '@react-native-picker/picker'; 
 import client from '../api/client';
+// 1. IMPORT OFFLINE HELPERS
+import { isOnline, queueAction, getSmartData } from '../api/offline';
 
 export default function MortalityScreen() {
-  // --- NEW: DROPDOWN STATE ---
   const [activeStockings, setActiveStockings] = useState([]);
   const [selectedStockId, setSelectedStockId] = useState(null);
 
@@ -15,20 +16,19 @@ export default function MortalityScreen() {
   const [cause, setCause] = useState('Flood');
   const [suggestion, setSuggestion] = useState(null);
 
-  // 1. Fetch Active Batches on Load
+  // 1. Fetch Active Batches (Works Offline now!)
   useEffect(() => {
     fetchActiveStockings();
   }, []);
 
   const fetchActiveStockings = async () => {
     try {
-      // Re-using the same API we built for Harvest!
-      const response = await client.get('/api/stocking/active');
-      setActiveStockings(response.data);
+      // Use the SAME cache key 'ACTIVE_STOCK_CACHE' that Harvest uses
+      const data = await getSmartData('ACTIVE_STOCK_CACHE', '/api/stocking/active');
       
-      // Auto-select first item
-      if (response.data.length > 0) {
-        setSelectedStockId(response.data[0].id);
+      if (data) {
+        setActiveStockings(data);
+        if (data.length > 0) setSelectedStockId(data[0].id);
       }
     } catch (error) {
       console.error(error);
@@ -37,36 +37,46 @@ export default function MortalityScreen() {
   };
 
   const handleSave = async () => {
-    if(!selectedStockId) {
-        Alert.alert("Error", "Please select a fish batch.");
-        return;
-    }
-    if(!qty || !kg) {
-        Alert.alert("Missing Info", "Please enter quantity and weight lost.");
-        return;
-    }
+    if(!selectedStockId) { Alert.alert("Error", "Please select a fish batch."); return; }
+    if(!qty || !kg) { Alert.alert("Missing Info", "Please enter quantity and weight lost."); return; }
 
-    try {
-      const payload = {
+    const payload = {
         stocking_id: parseInt(selectedStockId),
         loss_date: date,
         quantity_lost: parseInt(qty),
         weight_lost_kg: parseFloat(kg),
         cause: cause,
         action_taken: "Reported via App"
-      };
+    };
 
-      const response = await client.post('/api/mortality/', payload);
-      
-      setSuggestion(response.data.solution);
-      Alert.alert("Incident Recorded", "See recommendation below.");
-      
-      setQty('');
-      setKg('');
-      
-    } catch (error) {
-      console.log(error);
-      Alert.alert("Error", "Could not save report.");
+    // 2. Check Connection
+    const online = await isOnline();
+
+    if (online) {
+      // --- ONLINE MODE ---
+      try {
+        const response = await client.post('/api/mortality/', payload);
+        
+        setSuggestion(response.data.solution);
+        Alert.alert("Incident Recorded", "See recommendation below.");
+        
+        setQty('');
+        setKg('');
+        
+      } catch (error) {
+        console.log(error);
+        Alert.alert("Error", "Could not save report.");
+      }
+    } else {
+      // --- OFFLINE MODE ---
+      try {
+        await queueAction('/api/mortality/', payload);
+        Alert.alert("Saved Offline ⚠️", "Incident reported. Sync when you have internet to get AI suggestions.");
+        setQty('');
+        setKg('');
+      } catch (e) {
+        Alert.alert("Error", "Could not save offline.");
+      }
     }
   };
 
@@ -74,7 +84,6 @@ export default function MortalityScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>⚠️ Report Incident</Text>
       
-      {/* --- NEW: DROPDOWN SELECTION --- */}
       <Text style={styles.label}>Select Affected Batch:</Text>
       <View style={styles.pickerBox}>
         {activeStockings.length > 0 ? (
@@ -83,15 +92,11 @@ export default function MortalityScreen() {
                 onValueChange={(itemValue) => setSelectedStockId(itemValue)}
             >
                 {activeStockings.map((stock) => (
-                    <Picker.Item 
-                        key={stock.id} 
-                        label={stock.label} // Shows "Pond 1 - Tilapia..."
-                        value={stock.id} 
-                    />
+                    <Picker.Item key={stock.id} label={stock.label} value={stock.id} />
                 ))}
             </Picker>
         ) : (
-            <Text style={{padding: 15, color: 'red'}}>No active fish batches found to report.</Text>
+            <Text style={{padding: 15, color: 'red'}}>No active fish batches found.</Text>
         )}
       </View>
 
@@ -107,30 +112,13 @@ export default function MortalityScreen() {
       </View>
 
       <Text style={styles.label}>Quantity Lost (pcs):</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 1000" 
-        keyboardType="numeric" 
-        value={qty} 
-        onChangeText={setQty} 
-      />
+      <TextInput style={styles.input} placeholder="e.g. 1000" keyboardType="numeric" value={qty} onChangeText={setQty} />
 
       <Text style={styles.label}>Est. Weight Lost (kg):</Text>
-      <TextInput 
-        style={styles.input} 
-        placeholder="e.g. 200" 
-        keyboardType="numeric" 
-        value={kg} 
-        onChangeText={setKg} 
-      />
+      <TextInput style={styles.input} placeholder="e.g. 200" keyboardType="numeric" value={kg} onChangeText={setKg} />
 
       <View style={{marginTop: 20}}>
-        <Button 
-            title="Report Loss" 
-            onPress={handleSave} 
-            color="#D32F2F" 
-            disabled={activeStockings.length === 0}
-        />
+        <Button title="Report Loss" onPress={handleSave} color="#D32F2F" disabled={activeStockings.length === 0} />
       </View>
 
       {suggestion && (

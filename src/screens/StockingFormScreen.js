@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView } from 'react-native';
 import client from '../api/client';
+// 1. IMPORT OFFLINE HELPERS
+import { isOnline, queueAction } from '../api/offline';
 
 export default function StockingFormScreen() {
   const [pondId, setPondId] = useState(''); 
   const [fryType, setFryType] = useState('Tilapia');
   const [quantity, setQuantity] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // Default: Today (YYYY-MM-DD)
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]); 
 
   const handleSave = async () => {
     // 1. Validation
@@ -15,24 +17,35 @@ export default function StockingFormScreen() {
       return;
     }
 
-    try {
-      const payload = {
-        pond_id: parseInt(pondId),
-        stocking_date: date,
-        fry_type: fryType,
-        fry_quantity: parseInt(quantity)
-      };
+    const payload = {
+      pond_id: parseInt(pondId),
+      stocking_date: date,
+      fry_type: fryType,
+      fry_quantity: parseInt(quantity)
+    };
 
-      // 2. Send to Backend
-      const response = await client.post('/api/stocking/', payload);
+    // 2. Check Connection
+    const online = await isOnline();
 
-      // 3. Success
-      Alert.alert("Success", "Stocking Log Saved!");
-      // Reset form
-      setQuantity('');
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Error", "Could not save log. Check Pond ID.");
+    if (online) {
+        // --- ONLINE: Send to Server ---
+        try {
+          await client.post('/api/stocking/', payload);
+          Alert.alert("Success", "Stocking Log Saved!");
+          setQuantity(''); // Clear form
+        } catch (error) {
+          console.error(error);
+          Alert.alert("Error", "Could not save log. Check Pond ID.");
+        }
+    } else {
+        // --- OFFLINE: Queue It ---
+        try {
+            await queueAction('/api/stocking/', payload);
+            Alert.alert("Saved Offline ☁️", "Stocking record saved to device. Don't forget to Sync later!");
+            setQuantity(''); // Clear form locally
+        } catch (e) {
+            Alert.alert("Error", "Could not save offline.");
+        }
     }
   };
 
