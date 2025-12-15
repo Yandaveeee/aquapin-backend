@@ -15,6 +15,8 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons"; // For Search Icon
 import client from "../api/client";
+// 1. IMPORT OFFLINE HELPERS
+import { isOnline, queueAction, getSmartData } from '../api/offline';
 
 export default function PondMapperScreen() {
   const mapRef = useRef(null); // <--- Reference to control the map
@@ -30,12 +32,12 @@ export default function PondMapperScreen() {
   // Search State
   const [searchText, setSearchText] = useState("");
 
+  // --- UPDATED: Works Offline ---
   const fetchPonds = async () => {
-    try {
-      const response = await client.get("/api/ponds/");
-      setSavedPonds(response.data);
-    } catch (error) {
-      console.log("Error fetching ponds:", error);
+    // We use the SAME cache key as the List Screen so they share data
+    const data = await getSmartData('PONDS_LIST', '/api/ponds/');
+    if (data) {
+      setSavedPonds(data);
     }
   };
 
@@ -60,6 +62,14 @@ export default function PondMapperScreen() {
   // --- NEW: SEARCH FUNCTION ---
   const handleSearch = async () => {
     if (!searchText.trim()) return;
+    
+    // Check connection for search
+    const online = await isOnline();
+    if (!online) {
+        Alert.alert("Offline", "Search requires internet connection.");
+        return;
+    }
+
     Keyboard.dismiss(); // Hide keyboard
 
     try {
@@ -120,41 +130,71 @@ export default function PondMapperScreen() {
       return;
     }
 
-    try {
-      let addressString = "Unknown Location";
-      const firstPoint = coordinates[0];
-      const addressList = await Location.reverseGeocodeAsync({
-        latitude: firstPoint.latitude,
-        longitude: firstPoint.longitude,
-      });
+    // Check connection first
+    const online = await isOnline();
+    let addressString = "Pinned Location (Offline)";
 
-      if (addressList.length > 0) {
-        const addr = addressList[0];
-        addressString = `${addr.city || addr.subregion}, ${
-          addr.region || addr.country
-        }`;
+    // Only try to get address if online
+    if (online) {
+      try {
+        const firstPoint = coordinates[0];
+        const addressList = await Location.reverseGeocodeAsync({
+          latitude: firstPoint.latitude,
+          longitude: firstPoint.longitude,
+        });
+
+        if (addressList.length > 0) {
+          const addr = addressList[0];
+          addressString = `${addr.city || addr.subregion}, ${
+            addr.region || addr.country
+          }`;
+        }
+      } catch (e) {
+        console.log("Geocode failed");
       }
+    }
 
-      const payload = {
-        name: pondName,
-        location_desc: addressString,
-        coordinates: coordinates.map((c) => [c.latitude, c.longitude]),
-        image_base64: pondImage,
-      };
+    const payload = {
+      name: pondName,
+      location_desc: addressString,
+      coordinates: coordinates.map((c) => [c.latitude, c.longitude]),
+      image_base64: pondImage,
+    };
 
-      const response = await client.post("/api/ponds/", payload);
-      const area = response.data.area_sqm;
+    if (online) {
+      // --- ONLINE MODE ---
+      try {
+        const response = await client.post("/api/ponds/", payload);
+        const area = response.data.area_sqm;
 
-      Alert.alert("Success", `Saved: ${pondName}\nSize: ${area} sqm`);
+        Alert.alert("Success", `Saved: ${pondName}\nSize: ${area} sqm`);
 
-      setCoordinates([]);
-      setPondName("");
-      setPondImage(null);
-      setIsDrawing(false);
-      fetchPonds();
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Error", "Could not save pond.");
+        setCoordinates([]);
+        setPondName("");
+        setPondImage(null);
+        setIsDrawing(false);
+        fetchPonds();
+      } catch (error) {
+        console.error(error);
+        Alert.alert("Error", "Could not save pond.");
+      }
+    } else {
+      // --- OFFLINE MODE ---
+      try {
+        await queueAction("/api/ponds/", payload);
+        Alert.alert(
+          "Saved Offline ☁️",
+          "Pond map saved to device. Area size will be calculated when you Sync."
+        );
+
+        // Cleanup locally
+        setCoordinates([]);
+        setPondName("");
+        setPondImage(null);
+        setIsDrawing(false);
+      } catch (e) {
+        Alert.alert("Error", "Could not save offline.");
+      }
     }
   };
 
