@@ -1,13 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import client from './client'; // <--- Added import so Sync works automatically
 
 const QUEUE_KEY = 'OFFLINE_ACTION_QUEUE';
 
-// 1. Check Internet Connection
+// 1. Check Internet Connection (UPDATED FIX)
 export const isOnline = async () => {
   const state = await NetInfo.fetch();
-  // We check both isConnected AND isInternetReachable to be sure
-  return state.isConnected && (state.isInternetReachable !== false);
+  // FIX: Only check if connected to Wi-Fi/Data. 
+  // We remove 'isInternetReachable' because it often fails on local networks.
+  return state.isConnected; 
 };
 
 // 2. Helper: Save Data to Cache
@@ -20,7 +22,6 @@ export const cacheData = async (key, data) => {
 };
 
 // 3. Smart Fetch: Tries Network First -> Falls back to Cache
-// FIX: 'apiCall' must be a function like () => client.get(...)
 export const getSmartData = async (key, apiCall) => {
   const online = await isOnline();
 
@@ -31,9 +32,11 @@ export const getSmartData = async (key, apiCall) => {
       return response.data;
     } catch (error) {
       console.log(`⚠️ Network failed for ${key}. Falling back to cache.`);
+      // Optional: Log real error for debugging
+      if (error.response) console.log("Server Error:", error.response.status);
     }
   } else {
-    console.log(`📱 Offline. Loading ${key} from cache.`);
+    console.log(`📱 Offline (or Local Network). Loading ${key} from cache.`);
   }
 
   // Fallback: Load from storage
@@ -57,10 +60,10 @@ export const queueAction = async (endpoint, payload) => {
 };
 
 // 5. Sync: Upload all queued data
-// You need to pass the 'client' import to this function to avoid circular dependencies
-export const syncData = async (client) => {
+export const syncData = async () => {
+  // Check connection using our relaxed rule
   const online = await isOnline();
-  if (!online) return { success: false, message: "No Internet Connection" };
+  if (!online) return { success: false, message: "No Wi-Fi Connection" };
 
   const json = await AsyncStorage.getItem(QUEUE_KEY);
   const queue = json ? JSON.parse(json) : [];
@@ -75,8 +78,14 @@ export const syncData = async (client) => {
       await client.post(item.endpoint, item.payload);
       successCount++;
     } catch (error) {
-      console.error("Sync failed for item:", item);
-      failedItems.push(item); // Keep it if it fails
+      console.error("❌ Sync Failed for item:", item);
+      if (error.response) {
+          console.error("   Server replied:", error.response.status);
+          console.error("   Server message:", error.response.data);
+      } else {
+          console.error("   Network/Connection Error:", error.message);
+      }
+      failedItems.push(item); 
     }
   }
 
@@ -87,4 +96,7 @@ export const syncData = async (client) => {
     success: true, 
     message: `Synced ${successCount} items. ${failedItems.length} failed.` 
   };
+};
+export const clearQueue = async () => {
+  await AsyncStorage.removeItem(QUEUE_KEY);
 };
