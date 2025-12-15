@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Alert, Image, Modal, ScrollView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Alert, Image, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import client from '../api/client';
+import { getSmartData, syncData } from '../api/offline'; // <--- IMPORT THIS
 
 export default function PondListScreen() {
   const [ponds, setPonds] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false); // Loading state for sync
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPond, setSelectedPond] = useState(null);
 
+  // --- MODIFIED FETCH: Uses Cache if Offline ---
   const fetchPonds = async () => {
-    try {
-      const response = await client.get('/api/ponds/');
-      setPonds(response.data);
-    } catch (error) {
-      console.error("Fetch error:", error);
+    // Usage: getSmartData('CACHE_KEY_NAME', '/api/endpoint')
+    const data = await getSmartData('PONDS_LIST', '/api/ponds/');
+    if (data) {
+      setPonds(data);
     }
   };
 
@@ -26,6 +27,20 @@ export default function PondListScreen() {
     setRefreshing(true);
     fetchPonds().then(() => setRefreshing(false));
   }, []);
+
+  // --- NEW: SYNC FUNCTION ---
+  const handleSync = async () => {
+    setSyncing(true);
+    const result = await syncData();
+    setSyncing(false);
+    
+    if (result.success) {
+        Alert.alert("Sync Complete", result.message);
+        fetchPonds(); // Refresh list to show new data
+    } else {
+        Alert.alert("Sync Failed", result.message);
+    }
+  };
 
   const getDaysActive = (dateString) => {
     if (!dateString) return 0;
@@ -84,10 +99,30 @@ export default function PondListScreen() {
     <View style={styles.container}>
       <View style={styles.headerContainer}>
         <Text style={styles.header}>My Ponds</Text>
-        <TouchableOpacity style={styles.exportBtn} onPress={generatePDF}><Ionicons name="print-outline" size={20} color="white" /><Text style={styles.exportText}>Report</Text></TouchableOpacity>
+        
+        <View style={{flexDirection: 'row', gap: 10}}>
+             {/* --- SYNC BUTTON --- */}
+            <TouchableOpacity style={[styles.exportBtn, {backgroundColor: '#FFA000'}]} onPress={handleSync} disabled={syncing}>
+                {syncing ? <ActivityIndicator color="white" size="small"/> : <Ionicons name="cloud-upload-outline" size={20} color="white" />}
+                <Text style={styles.exportText}>Sync</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.exportBtn} onPress={generatePDF}>
+                <Ionicons name="print-outline" size={20} color="white" />
+                <Text style={styles.exportText}>Report</Text>
+            </TouchableOpacity>
+        </View>
       </View>
-      <FlatList data={ponds} keyExtractor={(item) => item.id.toString()} renderItem={renderItem} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} />
+
+      <FlatList 
+        data={ponds} 
+        keyExtractor={(item) => item.id.toString()} 
+        renderItem={renderItem} 
+        contentContainerStyle={styles.list} 
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} 
+      />
       
+      {/* Modal Code (Unchanged) */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>

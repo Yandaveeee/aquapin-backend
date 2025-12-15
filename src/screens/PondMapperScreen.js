@@ -1,10 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Button, Alert, TextInput, TouchableOpacity, Keyboard, Image } from 'react-native';
-import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker'; 
-import { Ionicons } from '@expo/vector-icons'; // For Search Icon
-import client from '../api/client'; 
+import React, { useState, useEffect, useRef } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  Button,
+  Alert,
+  TextInput,
+  TouchableOpacity,
+  Keyboard,
+  Image,
+} from "react-native";
+import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+import { Ionicons } from "@expo/vector-icons"; // For Search Icon
+import client from "../api/client";
 
 export default function PondMapperScreen() {
   const mapRef = useRef(null); // <--- Reference to control the map
@@ -12,17 +22,17 @@ export default function PondMapperScreen() {
   const [coordinates, setCoordinates] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [savedPonds, setSavedPonds] = useState([]);
-  
+
   // Form State
-  const [pondName, setPondName] = useState('');
+  const [pondName, setPondName] = useState("");
   const [pondImage, setPondImage] = useState(null);
-  
+
   // Search State
-  const [searchText, setSearchText] = useState('');
+  const [searchText, setSearchText] = useState("");
 
   const fetchPonds = async () => {
     try {
-      const response = await client.get('/api/ponds/');
+      const response = await client.get("/api/ponds/");
       setSavedPonds(response.data);
     } catch (error) {
       console.log("Error fetching ponds:", error);
@@ -32,8 +42,8 @@ export default function PondMapperScreen() {
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission denied');
+      if (status !== "granted") {
+        Alert.alert("Permission denied");
         return;
       }
       let location = await Location.getCurrentPositionAsync({});
@@ -55,14 +65,14 @@ export default function PondMapperScreen() {
     try {
       // 1. Convert Text to Coordinates
       const geocodedLocation = await Location.geocodeAsync(searchText);
-      
+
       if (geocodedLocation.length > 0) {
         const result = geocodedLocation[0];
         const newRegion = {
-            latitude: result.latitude,
-            longitude: result.longitude,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
+          latitude: result.latitude,
+          longitude: result.longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
         };
 
         // 2. Fly the Map to that location
@@ -88,7 +98,7 @@ export default function PondMapperScreen() {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.3,
@@ -113,34 +123,35 @@ export default function PondMapperScreen() {
     try {
       let addressString = "Unknown Location";
       const firstPoint = coordinates[0];
-      const addressList = await Location.reverseGeocodeAsync({ 
-          latitude: firstPoint.latitude, 
-          longitude: firstPoint.longitude 
+      const addressList = await Location.reverseGeocodeAsync({
+        latitude: firstPoint.latitude,
+        longitude: firstPoint.longitude,
       });
 
       if (addressList.length > 0) {
         const addr = addressList[0];
-        addressString = `${addr.city || addr.subregion}, ${addr.region || addr.country}`;
+        addressString = `${addr.city || addr.subregion}, ${
+          addr.region || addr.country
+        }`;
       }
 
       const payload = {
         name: pondName,
         location_desc: addressString,
-        coordinates: coordinates.map(c => [c.latitude, c.longitude]),
-        image_base64: pondImage
+        coordinates: coordinates.map((c) => [c.latitude, c.longitude]),
+        image_base64: pondImage,
       };
 
-      const response = await client.post('/api/ponds/', payload);
+      const response = await client.post("/api/ponds/", payload);
       const area = response.data.area_sqm;
-      
+
       Alert.alert("Success", `Saved: ${pondName}\nSize: ${area} sqm`);
-      
+
       setCoordinates([]);
-      setPondName('');
+      setPondName("");
       setPondImage(null);
       setIsDrawing(false);
       fetchPonds();
-
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Could not save pond.");
@@ -151,18 +162,18 @@ export default function PondMapperScreen() {
     <View style={styles.container}>
       {/* SEARCH BAR (Only shows when NOT drawing) */}
       {!isDrawing && (
-          <View style={styles.searchContainer}>
-            <TextInput 
-                style={styles.searchInput}
-                placeholder="Search location (e.g. Gonzaga)..."
-                value={searchText}
-                onChangeText={setSearchText}
-                onSubmitEditing={handleSearch}
-            />
-            <TouchableOpacity onPress={handleSearch} style={styles.searchBtn}>
-                <Ionicons name="search" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search location (e.g. Gonzaga)..."
+            value={searchText}
+            onChangeText={setSearchText}
+            onSubmitEditing={handleSearch}
+          />
+          <TouchableOpacity onPress={handleSearch} style={styles.searchBtn}>
+            <Ionicons name="search" size={20} color="white" />
+          </TouchableOpacity>
+        </View>
       )}
 
       {region ? (
@@ -181,52 +192,87 @@ export default function PondMapperScreen() {
           {savedPonds.map((pond) => (
             <Polygon
               key={pond.id}
-              coordinates={pond.coordinates.map(c => ({ latitude: c[0], longitude: c[1] }))}
-              fillColor={pond.name.includes("(None)") ? "rgba(128, 128, 128, 0.5)" : "rgba(0, 255, 0, 0.4)"}
+              coordinates={pond.coordinates.map((c) => ({
+                latitude: c[0],
+                longitude: c[1],
+              }))}
+              // FIX: Force green color for everyone
+              fillColor="rgba(0, 255, 0, 0.4)"
               strokeColor="rgba(255,255,255,0.8)"
               strokeWidth={2}
               tappable={true}
-              onPress={() => !isDrawing && Alert.alert("Pond Info", `ID: ${pond.id}\nName: ${pond.name}\nSize: ${pond.area_sqm} sqm`)}
+              onPress={() =>
+                !isDrawing &&
+                Alert.alert(
+                  "Pond Info",
+                  `ID: ${pond.id}\nName: ${pond.name}\nSize: ${pond.area_sqm} sqm`
+                )
+              }
             />
           ))}
 
           {coordinates.length > 0 && (
-            <Polygon coordinates={coordinates} fillColor="rgba(0, 200, 255, 0.5)" strokeColor="rgba(0, 0, 255, 0.5)" />
+            <Polygon
+              coordinates={coordinates}
+              fillColor="rgba(0, 200, 255, 0.5)"
+              strokeColor="rgba(0, 0, 255, 0.5)"
+            />
           )}
           {coordinates.map((marker, index) => (
             <Marker key={index} coordinate={marker} />
           ))}
         </MapView>
       ) : (
-        <Text style={{textAlign:'center', marginTop: 50}}>Locating...</Text>
+        <Text style={{ textAlign: "center", marginTop: 50 }}>Locating...</Text>
       )}
 
       <View style={styles.controls}>
         {!isDrawing ? (
-          <Button title=" + Add New Pond " onPress={() => setIsDrawing(true)} color="#007AFF" />
+          <Button
+            title=" + Add New Pond "
+            onPress={() => setIsDrawing(true)}
+            color="#007AFF"
+          />
         ) : (
           <View style={styles.formContainer}>
-            <Text style={styles.instruction}>Tap map to draw • Enter Name • Attach Photo</Text>
-            
-            <TextInput 
-                style={styles.input}
-                placeholder="Pond Name (e.g. North Sector)"
-                value={pondName}
-                onChangeText={setPondName}
+            <Text style={styles.instruction}>
+              Tap map to draw • Enter Name • Attach Photo
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Pond Name (e.g. North Sector)"
+              value={pondName}
+              onChangeText={setPondName}
             />
 
-            <TouchableOpacity 
-                onPress={takePhoto} 
-                style={{backgroundColor: pondImage ? '#e8f5e9' : '#eee', padding: 10, borderRadius: 8, marginBottom: 10, alignItems: 'center'}}
+            <TouchableOpacity
+              onPress={takePhoto}
+              style={{
+                backgroundColor: pondImage ? "#e8f5e9" : "#eee",
+                padding: 10,
+                borderRadius: 8,
+                marginBottom: 10,
+                alignItems: "center",
+              }}
             >
-                <Text style={{color: pondImage ? 'green' : 'black'}}>
-                    {pondImage ? "✅ Photo Attached (Retake?)" : "📷 Attach Photo"}
-                </Text>
+              <Text style={{ color: pondImage ? "green" : "black" }}>
+                {pondImage ? "✅ Photo Attached (Retake?)" : "📷 Attach Photo"}
+              </Text>
             </TouchableOpacity>
 
             <View style={styles.buttons}>
-                <Button title="Cancel" onPress={() => {setIsDrawing(false); setCoordinates([]); setPondName(''); setPondImage(null)}} color="red" />
-                <Button title="Save" onPress={savePond} color="green" />
+              <Button
+                title="Cancel"
+                onPress={() => {
+                  setIsDrawing(false);
+                  setCoordinates([]);
+                  setPondName("");
+                  setPondImage(null);
+                }}
+                color="red"
+              />
+              <Button title="Save" onPress={savePond} color="green" />
             </View>
           </View>
         )}
@@ -237,54 +283,67 @@ export default function PondMapperScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { width: '100%', height: '100%' },
+  map: { width: "100%", height: "100%" },
   controls: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 30,
-    width: '100%',
-    alignItems: 'center',
+    width: "100%",
+    alignItems: "center",
     paddingHorizontal: 20,
   },
-  
+
   // Search Bar Styles
   searchContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: 50, // Below status bar
     left: 20,
     right: 20,
     zIndex: 10, // Float on top of map
-    flexDirection: 'row',
-    backgroundColor: 'white',
+    flexDirection: "row",
+    backgroundColor: "white",
     borderRadius: 8,
     elevation: 5,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.2,
-    shadowOffset: {width:0, height:2}
+    shadowOffset: { width: 0, height: 2 },
   },
   searchInput: {
     flex: 1,
     padding: 10,
-    fontSize: 16
+    fontSize: 16,
   },
   searchBtn: {
-    backgroundColor: '#007AFF',
+    backgroundColor: "#007AFF",
     padding: 10,
     borderTopRightRadius: 8,
     borderBottomRightRadius: 8,
-    justifyContent: 'center'
+    justifyContent: "center",
   },
 
   formContainer: {
-    backgroundColor: 'white',
+    backgroundColor: "white",
     padding: 15,
     borderRadius: 15,
-    width: '100%',
+    width: "100%",
     elevation: 5,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
   },
-  instruction: { textAlign: 'center', color: '#666', marginBottom: 10, fontSize: 12 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 10, fontSize: 16, backgroundColor: '#f9f9f9' },
-  buttons: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 }
+  instruction: {
+    textAlign: "center",
+    color: "#666",
+    marginBottom: 10,
+    fontSize: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    fontSize: 16,
+    backgroundColor: "#f9f9f9",
+  },
+  buttons: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
 });
