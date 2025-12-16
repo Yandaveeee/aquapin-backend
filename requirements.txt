@@ -6,7 +6,7 @@ geoalchemy2
 shapely
 pydantic
 python-dotenv
-scikit-learn
+scikit-learn==1.7.2
 pandas
 numpy
 joblib
