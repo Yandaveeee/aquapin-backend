@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -37,9 +38,11 @@ export default function PondListScreen() {
     }
   };
 
-  useEffect(() => {
-    fetchPonds();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchPonds();
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

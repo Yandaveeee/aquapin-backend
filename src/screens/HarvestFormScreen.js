@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView } from 'react-native';
+// 1. If this import fails, the app crashes. Make sure you ran the npm install command!
 import { Picker } from '@react-native-picker/picker'; 
 import client from '../api/client';
-// 1. IMPORT OFFLINE HELPERS
 import { isOnline, queueAction, getSmartData } from '../api/offline';
 
 export default function HarvestFormScreen() {
@@ -14,20 +15,31 @@ export default function HarvestFormScreen() {
   const [size, setSize] = useState('Standard'); 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // --- MODIFIED: Load active stockings even if offline ---
   const fetchActiveStockings = async () => {
-    // IMPORTANT: Use the same pattern () => client.get(...)
-    const data = await getSmartData('ACTIVE_STOCK_CACHE', () => client.get('/api/stocking/active'));
-    
-    if (data) {
-      setActiveStockings(data);
-      if (data.length > 0) setSelectedStockId(data[0].id);
+    try {
+      // Use the smart data fetcher
+      const data = await getSmartData('ACTIVE_STOCK_CACHE', () => client.get('/api/stocking/active'));
+      
+      // 2. SAFETY CHECK: Ensure data is actually an Array before using it
+      if (Array.isArray(data)) {
+        setActiveStockings(data);
+        if (data.length > 0 && !selectedStockId) {
+          setSelectedStockId(data[0].id);
+        }
+      } else {
+        console.log("Data is not an array:", data);
+        setActiveStockings([]); // Set to empty to prevent crash
+      }
+    } catch (e) {
+      console.log("Error loading stockings:", e);
     }
   };
 
-  useEffect(() => {
-    fetchActiveStockings();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchActiveStockings();
+    }, [])
+  );
 
   const handleSave = async () => {
     if (!selectedStockId) { Alert.alert("Error", "No active fish batch selected."); return; }
@@ -44,7 +56,6 @@ export default function HarvestFormScreen() {
     const online = await isOnline();
 
     if (online) {
-        // --- ONLINE MODE ---
         try {
             const response = await client.post('/api/harvest/', payload);
             Alert.alert("✅ Harvest Recorded!", `Profit: ₱${response.data.revenue?.toLocaleString()}`);
@@ -52,10 +63,10 @@ export default function HarvestFormScreen() {
             setPrice('');
             fetchActiveStockings(); 
         } catch (error) {
-            Alert.alert("Error", "Server Error");
+            console.log(error);
+            Alert.alert("Error", "Server Error. Try again.");
         }
     } else {
-        // --- OFFLINE MODE ---
         await queueAction('/api/harvest/', payload);
         Alert.alert("Saved Offline ☁️", "Harvest saved to device. Don't forget to Sync later!");
         setWeight('');
@@ -66,8 +77,10 @@ export default function HarvestFormScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Harvest Record</Text>
+      
       <Text style={styles.label}>Select Batch to Harvest:</Text>
       <View style={styles.pickerContainer}>
+        {/* 3. SAFETY CHECK: Only show picker if we have items */}
         {activeStockings.length > 0 ? (
             <Picker selectedValue={selectedStockId} onValueChange={(itemValue) => setSelectedStockId(itemValue)}>
                 {activeStockings.map((stock) => (
@@ -75,16 +88,21 @@ export default function HarvestFormScreen() {
                 ))}
             </Picker>
         ) : (
-            <Text style={{padding: 15, color: 'red'}}>No active fish batches found.</Text>
+            <Text style={{padding: 15, color: '#666'}}>
+               {activeStockings.length === 0 ? "Loading or No Active Batches..." : "No active fish batches found."}
+            </Text>
         )}
       </View>
 
       <Text style={styles.label}>Harvest Date:</Text>
       <TextInput style={styles.input} value={date} onChangeText={setDate} />
+      
       <Text style={styles.label}>Total Weight (kg):</Text>
       <TextInput style={styles.input} placeholder="e.g. 1200" keyboardType="numeric" value={weight} onChangeText={setWeight} />
+      
       <Text style={styles.label}>Price per Kg (₱):</Text>
       <TextInput style={styles.input} placeholder="e.g. 150" keyboardType="numeric" value={price} onChangeText={setPrice} />
+      
       <Text style={styles.label}>Fish Size:</Text>
       <View style={styles.pickerContainer}>
         <Picker selectedValue={size} onValueChange={setSize}>
@@ -93,6 +111,7 @@ export default function HarvestFormScreen() {
             <Picker.Item label="Fingerling (Early Harvest)" value="Fingerling" />
         </Picker>
       </View>
+      
       <View style={styles.btnContainer}>
         <Button title="Save Harvest" onPress={handleSave} color="green" disabled={activeStockings.length === 0} />
       </View>

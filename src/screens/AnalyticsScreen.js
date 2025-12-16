@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Dimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import client from '../api/client';
-// 1. IMPORT OFFLINE HELPERS
+import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // <--- NEW IMPORT
 import { getSmartData } from '../api/offline';
 
 const screenWidth = Dimensions.get("window").width;
@@ -11,10 +12,26 @@ export default function AnalyticsScreen() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [userName, setUserName] = useState("Farmer"); // <--- Default name
+
+  // 1. Function to Load Profile Name
+  const loadProfile = async () => {
+    try {
+      const json = await AsyncStorage.getItem('USER_PROFILE');
+      if (json) {
+        const profile = JSON.parse(json);
+        if (profile.name) {
+          setUserName(profile.name);
+        }
+      }
+    } catch (e) {
+      console.log("Error loading profile:", e);
+    }
+  };
 
   const fetchAnalytics = async () => {
     try {
-      // 2. Use Smart Data to cache the analytics result
+      // Use Smart Data to cache the analytics result
       const result = await getSmartData('ANALYTICS_CACHE', () => client.get('/api/analytics/summary'));
       if (result) {
           setData(result);
@@ -26,9 +43,12 @@ export default function AnalyticsScreen() {
     }
   };
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchAnalytics();
+      loadProfile(); // <--- Load name every time screen opens
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -36,7 +56,17 @@ export default function AnalyticsScreen() {
   }, []);
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{marginTop: 15, fontSize: 16, color: '#555', fontWeight: 'bold'}}>
+          Connecting to AquaPin Cloud...
+        </Text>
+        <Text style={{marginTop: 5, fontSize: 12, color: '#999'}}>
+          (This may take a moment if waking up)
+        </Text>
+      </View>
+    );
   }
 
   if (!data) {
@@ -53,9 +83,13 @@ export default function AnalyticsScreen() {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.header}>Farm Dashboard</Text>
-      
-      {/* KPI CARDS */}
+      {/* --- NEW PERSONALIZED HEADER --- */}
+      <View style={{marginBottom: 20}}>
+         <Text style={{fontSize: 16, color: '#666'}}>Welcome back,</Text>
+         <Text style={{fontSize: 28, fontWeight: 'bold', color: '#1565C0'}}>{userName} 👋</Text>
+      </View>
+
+      {/* --- EXISTING KPI CARDS --- */}
       <View style={styles.kpiContainer}>
         <View style={[styles.card, {backgroundColor: '#E8F5E9'}]}>
             <Text style={styles.cardLabel}>Total Revenue</Text>
@@ -86,6 +120,7 @@ export default function AnalyticsScreen() {
         </View>
       </View>
 
+      {/* --- EXISTING RECOMMENDATION BOX --- */}
       <View style={styles.alertBox}>
         <Text style={styles.alertTitle}>⚠️ System Recommendation</Text>
         <Text style={styles.alertText}>
@@ -130,7 +165,7 @@ export default function AnalyticsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 50, backgroundColor: '#fff' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { fontSize: 28, fontWeight: 'bold', marginBottom: 20 },
+  // Header styles updated in-line, but you can add them here if you prefer
   kpiContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   card: { width: '48%', padding: 15, borderRadius: 12, alignItems: 'center', elevation: 2 },
   cardLabel: { fontSize: 13, color: '#555', marginBottom: 5 },
