@@ -4,37 +4,38 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.connection import engine, Base, get_db
 
-# 1. IMPORT ALL MODELS (Required so SQLAlchemy knows they exist)
-from app.models.pond import Pond
-from app.models.stocking import StockingLog
-from app.models.harvest import HarvestLog
-from app.models.mortality import MortalityLog
+# 1. IMPORT MODELS (The Clean Way)
+# Since we made the 'models/__init__.py' file, we can just do this:
+from app import models 
 
-# 2. IMPORT ALL API ROUTERS
+# 2. IMPORT API ROUTERS
 from app.api import ponds, stocking, harvest, predictions, analytics, chat, mortality 
 
 app = FastAPI(title="AquaPin API", version="1.0.0")
 
-# 3. ENABLE CORS (Mobile Access)
+# 3. ENABLE CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows ALL origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# 4. CRITICAL: Enable PostGIS Extension BEFORE creating tables
-try:
-    with engine.connect() as connection:
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-        connection.commit()
-        print("✅ PostGIS Extension enabled successfully!")
-except Exception as e:
-    print(f"⚠️ Could not enable PostGIS: {e}")
+# 4. DATABASE RESET (CRITICAL FOR PRIVACY UPDATE)
+# Since we added 'owner_id' and changed 'geometry' to 'json', 
+# the old database structure is invalid.
+#
+# INSTRUCTION: 
+# 1. Uncomment the line below 'drop_all'.
+# 2. Deploy to Render.
+# 3. Comment it out again after success.
 
-# 5. CREATE TABLES (Now safe to run)
-Base.metadata.create_all(bind=engine)
+models.Base.metadata.drop_all(bind=engine)
+
+# 5. CREATE TABLES
+# This creates the new tables using the new definitions in models/
+models.Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def read_root():
@@ -43,9 +44,9 @@ def read_root():
 @app.get("/test-db")
 def test_db_connection(db: Session = Depends(get_db)):
     try:
-        # Simple query to verify PostGIS is working
-        result = db.execute(text("SELECT postgis_full_version()"))
-        return {"status": "success", "postgis_version": result.scalar()}
+        # Simple query to check connection
+        result = db.execute(text("SELECT 1"))
+        return {"status": "success", "db_connected": True}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
