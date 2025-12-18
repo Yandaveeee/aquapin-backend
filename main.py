@@ -2,10 +2,10 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from app.db.connection import engine, Base, get_db
+from app.db.connection import engine, Base, get_db # <--- Base is imported here
 
-# 1. IMPORT MODELS (The Clean Way)
-# Since we made the 'models/__init__.py' file, we can just do this:
+# 1. IMPORT MODELS
+# This runs the __init__.py inside models/, which registers the tables to Base
 from app import models 
 
 # 2. IMPORT API ROUTERS
@@ -23,19 +23,14 @@ app.add_middleware(
 )
 
 # 4. DATABASE RESET (CRITICAL FOR PRIVACY UPDATE)
-# Since we added 'owner_id' and changed 'geometry' to 'json', 
-# the old database structure is invalid.
-#
-# INSTRUCTION: 
-# 1. Uncomment the line below 'drop_all'.
-# 2. Deploy to Render.
-# 3. Comment it out again after success.
+# ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'
 
-models.Base.metadata.drop_all(bind=engine)
+# Uncomment the next line to WIPE the database (Run once, then comment out)
+Base.metadata.drop_all(bind=engine)
 
 # 5. CREATE TABLES
-# This creates the new tables using the new definitions in models/
-models.Base.metadata.create_all(bind=engine)
+# ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'
+Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def read_root():
@@ -44,7 +39,6 @@ def read_root():
 @app.get("/test-db")
 def test_db_connection(db: Session = Depends(get_db)):
     try:
-        # Simple query to check connection
         result = db.execute(text("SELECT 1"))
         return {"status": "success", "db_connected": True}
     except Exception as e:
