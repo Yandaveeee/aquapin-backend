@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List
 from app.db.connection import get_db
@@ -9,43 +9,66 @@ from app.schemas.stocking import StockingCreate, StockingResponse
 
 router = APIRouter()
 
-# --- GET ACTIVE STOCKINGS (The one causing the error) ---
+# --- GET ACTIVE STOCKINGS (FIXED) ---
 @router.get("/active")
-def get_active_stockings(db: Session = Depends(get_db)):
+def get_active_stockings(
+    db: Session = Depends(get_db),
+    x_user_id: str = Header(...) # <--- Added User ID for security
+):
     try:
-        # 1. Find which stockings are already harvested
+        # 1. Get ONLY this user's ponds
+        user_ponds = db.query(Pond).filter(Pond.owner_id == x_user_id).all()
+        user_pond_ids = [p.id for p in user_ponds]
+
+        if not user_pond_ids:
+            return []
+
+        # 2. Find which stockings are already harvested
         harvested_ids = db.query(HarvestLog.stocking_id).all()
-        # Convert list of tuples [(1,), (2,)] -> [1, 2]
         harvested_ids = [h[0] for h in harvested_ids]
 
-        # 2. Find stockings NOT in that list
+        # 3. Find stockings that are (A) in user's ponds AND (B) NOT harvested
+        query = db.query(StockingLog).filter(StockingLog.pond_id.in_(user_pond_ids))
+        
         if harvested_ids:
-            active_stockings = db.query(StockingLog).filter(StockingLog.id.notin_(harvested_ids)).all()
-        else:
-            active_stockings = db.query(StockingLog).all()
+            query = query.filter(StockingLog.id.notin_(harvested_ids))
+            
+        active_stockings = query.all()
         
         results = []
         for stock in active_stockings:
-            # Get Pond Name safely
-            pond = db.query(Pond).filter(Pond.id == stock.pond_id).first()
+            # Get Pond Name
+            pond = next((p for p in user_ponds if p.id == stock.pond_id), None)
             pond_name = pond.name if pond else f"Pond {stock.pond_id}"
             
             results.append({
                 "id": stock.id,
+                "pond_id": stock.pond_id,  # <--- CRITICAL FIX: Frontend needs this to filter!
                 "label": f"{pond_name} - {stock.fry_type} ({stock.fry_quantity}pcs)",
-                "date": stock.stocking_date
+                "date": stock.stocking_date,
+                "fry_type": stock.fry_type,        # Added for good measure
+                "fry_quantity": stock.fry_quantity # Added for good measure
             })
         
         return results
 
     except Exception as e:
-        print(f"❌ STOCKING ERROR: {e}") # Look at your terminal for this!
+        print(f"❌ STOCKING ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- CREATE STOCKING ---
 @router.post("/", response_model=StockingResponse)
-def create_stocking_log(log: StockingCreate, db: Session = Depends(get_db)):
+def create_stocking_log(
+    log: StockingCreate, 
+    db: Session = Depends(get_db),
+    x_user_id: str = Header(...) # <--- Added User ID for security
+):
     try:
+        # Verify the pond belongs to the user
+        pond = db.query(Pond).filter(Pond.id == log.pond_id, Pond.owner_id == x_user_id).first()
+        if not pond:
+             raise HTTPException(status_code=404, detail="Pond not found or access denied")
+
         new_log = StockingLog(
             pond_id=log.pond_id,
             stocking_date=log.stocking_date,
@@ -58,6 +81,8 @@ def create_stocking_log(log: StockingCreate, db: Session = Depends(get_db)):
         db.refresh(new_log)
         return new_log
         
+    except HTTPException as he:
+        raise he
     except Exception as e:
         print(f"❌ CREATE ERROR: {e}")
         raise HTTPException(status_code=500, detail="Could not save stocking log")
