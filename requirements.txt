@@ -3,10 +3,10 @@ uvicorn
 pydantic
 requests
 python-dotenv
-google-generativeai>=0.7.2
 sqlalchemy
 psycopg2-binary
 joblib
-scikit-learn
 numpy
 pandas
+scikit-learn
+google-generativeai>=0.7.2
