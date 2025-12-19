@@ -9,7 +9,7 @@ from app.db.connection import engine, Base, get_db # <--- Base is imported here
 from app import models 
 
 # 2. IMPORT API ROUTERS
-from app.api import ponds, stocking, harvest, predictions, analytics, chat, mortality 
+from app.api import ponds, stocking, harvest, predictions, analytics, chat, mortality, history
 
 app = FastAPI(title="AquaPin API", version="1.0.0")
 
@@ -52,3 +52,4 @@ app.include_router(predictions.router, prefix="/api/predict", tags=["AI Predicti
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(chat.router, prefix="/api/chat", tags=["AI Chat"])
 app.include_router(mortality.router, prefix="/api/mortality", tags=["Mortality"])
+app.include_router(history.router, prefix="/api/history", tags=["History"])
