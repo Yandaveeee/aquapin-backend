@@ -9,11 +9,11 @@ from app.schemas.stocking import StockingCreate, StockingResponse
 
 router = APIRouter()
 
-# --- GET ACTIVE STOCKINGS (FIXED) ---
+# --- GET ACTIVE STOCKINGS (Fixed for Loss Report) ---
 @router.get("/active")
 def get_active_stockings(
     db: Session = Depends(get_db),
-    x_user_id: str = Header(...) # <--- Added User ID for security
+    x_user_id: str = Header(...) 
 ):
     try:
         # 1. Get ONLY this user's ponds
@@ -23,31 +23,30 @@ def get_active_stockings(
         if not user_pond_ids:
             return []
 
-        # 2. Find which stockings are already harvested
+        # 2. Find harvested IDs
         harvested_ids = db.query(HarvestLog.stocking_id).all()
         harvested_ids = [h[0] for h in harvested_ids]
 
-        # 3. Find stockings that are (A) in user's ponds AND (B) NOT harvested
+        # 3. Filter Stockings
         query = db.query(StockingLog).filter(StockingLog.pond_id.in_(user_pond_ids))
-        
         if harvested_ids:
             query = query.filter(StockingLog.id.notin_(harvested_ids))
             
         active_stockings = query.all()
         
+        # 4. Build Response
         results = []
         for stock in active_stockings:
-            # Get Pond Name
             pond = next((p for p in user_ponds if p.id == stock.pond_id), None)
             pond_name = pond.name if pond else f"Pond {stock.pond_id}"
             
             results.append({
                 "id": stock.id,
-                "pond_id": stock.pond_id,  # <--- CRITICAL FIX: Frontend needs this to filter!
+                "pond_id": stock.pond_id,  # <--- Fixes the Frontend Filter
                 "label": f"{pond_name} - {stock.fry_type} ({stock.fry_quantity}pcs)",
                 "date": stock.stocking_date,
-                "fry_type": stock.fry_type,        # Added for good measure
-                "fry_quantity": stock.fry_quantity # Added for good measure
+                "fry_type": stock.fry_type,
+                "fry_quantity": stock.fry_quantity
             })
         
         return results
@@ -56,20 +55,18 @@ def get_active_stockings(
         print(f"❌ STOCKING ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- CREATE STOCKING ---
+# --- CREATE STOCKING (Fixed: Removed invalid DB write) ---
 @router.post("/", response_model=StockingResponse)
 def create_stocking_log(
     log: StockingCreate, 
     db: Session = Depends(get_db),
-    x_user_id: str = Header(...) # <--- Added User ID for security
+    x_user_id: str = Header(...) 
 ):
     try:
-        # Verify the pond belongs to the user
         pond = db.query(Pond).filter(Pond.id == log.pond_id, Pond.owner_id == x_user_id).first()
         if not pond:
              raise HTTPException(status_code=404, detail="Pond not found or access denied")
 
-        # Create the stocking log
         new_log = StockingLog(
             pond_id=log.pond_id,
             stocking_date=log.stocking_date,
@@ -78,12 +75,9 @@ def create_stocking_log(
         )
         
         db.add(new_log)
-        
-        # ✅ UPDATE: Set the pond's last_stocked_at to this stocking date
-        pond.last_stocked_at = log.stocking_date
-        
         db.commit()
         db.refresh(new_log)
+        
         return new_log
         
     except HTTPException as he:

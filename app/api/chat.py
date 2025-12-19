@@ -13,7 +13,7 @@ class ChatResponse(BaseModel):
 
 # 1. SETUP GOOGLE GEMINI (The "Smart Brain")
 # PASTE YOUR API KEY HERE INSIDE THE QUOTES
-GOOGLE_API_KEY = "AIzaSyAQLaqGh3Kz-09Yha-k1ICvKFuzEDohIlM"
+GOOGLE_API_KEY = "AIzaSyAWUE_BKu267ljWNVlu0PFfs-1UyagLAUQ"
 
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
