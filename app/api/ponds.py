@@ -2,24 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List
 import math
-from sqlalchemy import desc # <--- NEW IMPORT
+from sqlalchemy import desc
 
 from app.db.connection import get_db
 from app.models.pond import Pond
-from app.models.stocking import StockingLog # <--- NEW IMPORT
-from app.models.harvest import HarvestLog   # <--- NEW IMPORT
+from app.models.stocking import StockingLog
+from app.models.harvest import HarvestLog
 from app.schemas.pond import PondCreate, PondResponse
 
 router = APIRouter()
 
 # --- HELPER: Calculate Area in Python (Shoelace Formula) ---
 def calculate_polygon_area(coords):
-    # coords is a list of [lat, lng]
     if len(coords) < 3:
         return 0.0
     
     area = 0.0
-    # Approximate conversion: 1 deg = 111,320 meters
     METERS_PER_DEGREE = 111320.0 
     
     for i in range(len(coords)):
@@ -27,7 +25,6 @@ def calculate_polygon_area(coords):
         lat1, lon1 = coords[i]
         lat2, lon2 = coords[j]
         
-        # Simple projection to meters
         x1 = lon1 * METERS_PER_DEGREE * math.cos(math.radians(lat1))
         y1 = lat1 * METERS_PER_DEGREE
         x2 = lon2 * METERS_PER_DEGREE * math.cos(math.radians(lat2))
@@ -37,13 +34,27 @@ def calculate_polygon_area(coords):
         
     return abs(area) / 2.0
 
-# 1. GET ALL PONDS (Private Mode)
+# 1. GET ALL PONDS (UPDATED: Now populates stocking status!)
 @router.get("/", response_model=List[PondResponse])
 def get_all_ponds(
     db: Session = Depends(get_db), 
     x_user_id: str = Header(...) 
 ):
+    # 1. Get all ponds for this user
     ponds = db.query(Pond).filter(Pond.owner_id == x_user_id).all()
+    
+    # 2. Check status for EACH pond
+    for pond in ponds:
+        last_stock = db.query(StockingLog).filter(StockingLog.pond_id == pond.id).order_by(desc(StockingLog.stocking_date)).first()
+        
+        if last_stock:
+            # Check if this batch was already harvested
+            is_harvested = db.query(HarvestLog).filter(HarvestLog.stocking_id == last_stock.id).first()
+            
+            # If NOT harvested yet, mark as active
+            if not is_harvested:
+                pond.last_stocked_at = last_stock.stocking_date
+                
     return ponds
 
 # 2. CREATE NEW POND
@@ -75,30 +86,24 @@ def create_pond(
         print(f"SERVER ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 3. GET SINGLE POND (NEW: Refreshes Data when screen opens)
+# 3. GET SINGLE POND
 @router.get("/{pond_id}", response_model=PondResponse)
 def get_pond(
     pond_id: int, 
     db: Session = Depends(get_db), 
     x_user_id: str = Header(...)
 ):
-    # Find the pond belonging to this user
     pond = db.query(Pond).filter(Pond.id == pond_id, Pond.owner_id == x_user_id).first()
     if not pond:
         raise HTTPException(status_code=404, detail="Pond not found")
 
-    # Check Stocking Status (Is it active?)
-    # Get the LATEST stocking log
     last_stock = db.query(StockingLog).filter(StockingLog.pond_id == pond.id).order_by(desc(StockingLog.stocking_date)).first()
     
     stock_date = None
     if last_stock:
-        # Check if this batch was already harvested
         is_harvested = db.query(HarvestLog).filter(HarvestLog.stocking_id == last_stock.id).first()
         if not is_harvested:
-            # If NOT harvested yet, it is still active
             stock_date = last_stock.stocking_date
 
-    # Attach status to response (Python will auto-convert this to JSON)
     pond.last_stocked_at = stock_date
     return pond
