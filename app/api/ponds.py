@@ -2,9 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List
 import math
+from sqlalchemy import desc # <--- NEW IMPORT
 
 from app.db.connection import get_db
 from app.models.pond import Pond
+from app.models.stocking import StockingLog # <--- NEW IMPORT
+from app.models.harvest import HarvestLog   # <--- NEW IMPORT
 from app.schemas.pond import PondCreate, PondResponse
 
 router = APIRouter()
@@ -17,7 +20,6 @@ def calculate_polygon_area(coords):
     
     area = 0.0
     # Approximate conversion: 1 deg = 111,320 meters
-    # This is rough but sufficient for a feasibility study
     METERS_PER_DEGREE = 111320.0 
     
     for i in range(len(coords)):
@@ -39,9 +41,8 @@ def calculate_polygon_area(coords):
 @router.get("/", response_model=List[PondResponse])
 def get_all_ponds(
     db: Session = Depends(get_db), 
-    x_user_id: str = Header(...) # <--- READS THE USER ID FROM HEADER
+    x_user_id: str = Header(...) 
 ):
-    # FILTER: Only return ponds that belong to this user
     ponds = db.query(Pond).filter(Pond.owner_id == x_user_id).all()
     return ponds
 
@@ -50,19 +51,18 @@ def get_all_ponds(
 def create_pond(
     pond_data: PondCreate, 
     db: Session = Depends(get_db),
-    x_user_id: str = Header(...) # <--- ATTACHES USER ID TO NEW POND
+    x_user_id: str = Header(...) 
 ):
     try:
-        # Calculate Area in Python
         calculated_area = calculate_polygon_area(pond_data.coordinates)
         
         new_pond = Pond(
             name=pond_data.name,
             location_desc=pond_data.location_desc,
             image_base64=pond_data.image_base64,
-            coordinates=pond_data.coordinates, # Save JSON directly
+            coordinates=pond_data.coordinates, 
             area_sqm=round(calculated_area, 2),
-            owner_id=x_user_id # Save the Owner
+            owner_id=x_user_id 
         )
         
         db.add(new_pond)
@@ -74,3 +74,31 @@ def create_pond(
     except Exception as e:
         print(f"SERVER ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# 3. GET SINGLE POND (NEW: Refreshes Data when screen opens)
+@router.get("/{pond_id}", response_model=PondResponse)
+def get_pond(
+    pond_id: int, 
+    db: Session = Depends(get_db), 
+    x_user_id: str = Header(...)
+):
+    # Find the pond belonging to this user
+    pond = db.query(Pond).filter(Pond.id == pond_id, Pond.owner_id == x_user_id).first()
+    if not pond:
+        raise HTTPException(status_code=404, detail="Pond not found")
+
+    # Check Stocking Status (Is it active?)
+    # Get the LATEST stocking log
+    last_stock = db.query(StockingLog).filter(StockingLog.pond_id == pond.id).order_by(desc(StockingLog.stocking_date)).first()
+    
+    stock_date = None
+    if last_stock:
+        # Check if this batch was already harvested
+        is_harvested = db.query(HarvestLog).filter(HarvestLog.stocking_id == last_stock.id).first()
+        if not is_harvested:
+            # If NOT harvested yet, it is still active
+            stock_date = last_stock.stocking_date
+
+    # Attach status to response (Python will auto-convert this to JSON)
+    pond.last_stocked_at = stock_date
+    return pond
