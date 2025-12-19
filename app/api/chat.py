@@ -24,7 +24,7 @@ model = None
 if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-pro') 
         print("✅ Google Gemini AI Loaded")
     except Exception as e:
         print(f"⚠️ AI Setup Failed: {e}")
