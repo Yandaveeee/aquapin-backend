@@ -4,3 +4,5 @@ pydantic
 requests
 python-dotenv
 google-generativeai
+sqlalchemy
+psycopg2-binary
