@@ -69,6 +69,7 @@ def create_stocking_log(
         if not pond:
              raise HTTPException(status_code=404, detail="Pond not found or access denied")
 
+        # Create the stocking log
         new_log = StockingLog(
             pond_id=log.pond_id,
             stocking_date=log.stocking_date,
@@ -77,6 +78,10 @@ def create_stocking_log(
         )
         
         db.add(new_log)
+        
+        # ✅ UPDATE: Set the pond's last_stocked_at to this stocking date
+        pond.last_stocked_at = log.stocking_date
+        
         db.commit()
         db.refresh(new_log)
         return new_log
