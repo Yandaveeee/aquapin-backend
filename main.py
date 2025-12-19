@@ -26,7 +26,7 @@ app.add_middleware(
 # ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'
 
 # Uncomment the next line to WIPE the database (Run once, then comment out)
-# Base.metadata.drop_all(bind=engine)
+Base.metadata.drop_all(bind=engine)
 
 # 5. CREATE TABLES
 # ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'

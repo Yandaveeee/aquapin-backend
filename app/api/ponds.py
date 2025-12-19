@@ -1,99 +1,74 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from sqlalchemy import text, desc
-from shapely.geometry import Polygon
-from geoalchemy2.shape import from_shape, to_shape
 from typing import List
+import math
 
 from app.db.connection import get_db
 from app.models.pond import Pond
-from app.models.stocking import StockingLog
-from app.models.harvest import HarvestLog
 from app.schemas.pond import PondCreate, PondResponse
 
 router = APIRouter()
 
-# 1. FETCH ALL PONDS (GET)
+# --- HELPER: Calculate Area in Python (Shoelace Formula) ---
+def calculate_polygon_area(coords):
+    # coords is a list of [lat, lng]
+    if len(coords) < 3:
+        return 0.0
+    
+    area = 0.0
+    # Approximate conversion: 1 deg = 111,320 meters
+    # This is rough but sufficient for a feasibility study
+    METERS_PER_DEGREE = 111320.0 
+    
+    for i in range(len(coords)):
+        j = (i + 1) % len(coords)
+        lat1, lon1 = coords[i]
+        lat2, lon2 = coords[j]
+        
+        # Simple projection to meters
+        x1 = lon1 * METERS_PER_DEGREE * math.cos(math.radians(lat1))
+        y1 = lat1 * METERS_PER_DEGREE
+        x2 = lon2 * METERS_PER_DEGREE * math.cos(math.radians(lat2))
+        y2 = lat2 * METERS_PER_DEGREE
+        
+        area += (x1 * y2) - (x2 * y1)
+        
+    return abs(area) / 2.0
+
+# 1. GET ALL PONDS (Private Mode)
 @router.get("/", response_model=List[PondResponse])
-def get_all_ponds(db: Session = Depends(get_db)):
-    ponds = db.query(Pond).all()
-    results = []
+def get_all_ponds(
+    db: Session = Depends(get_db), 
+    x_user_id: str = Header(...) # <--- READS THE USER ID FROM HEADER
+):
+    # FILTER: Only return ponds that belong to this user
+    ponds = db.query(Pond).filter(Pond.owner_id == x_user_id).all()
+    return ponds
 
-    for pond in ponds:
-        # Convert PostGIS shape back to Coordinates
-        try:
-            shapely_poly = to_shape(pond.geometry)
-            
-            # --- FIX IS HERE: Use (y, x) for Tuples, not [y, x] ---
-            coords = [(y, x) for x, y in shapely_poly.exterior.coords][:-1]
-            # ------------------------------------------------------
-            
-        except Exception:
-            coords = []
-
-        # Check Stocking Status
-        last_stock = db.query(StockingLog).filter(StockingLog.pond_id == pond.id).order_by(desc(StockingLog.stocking_date)).first()
-        
-        fish_type = "(None)"
-        stock_date = None 
-        
-        if last_stock:
-            is_harvested = db.query(HarvestLog).filter(HarvestLog.stocking_id == last_stock.id).first()
-            if not is_harvested:
-                fish_type = f"({last_stock.fry_type})"
-                stock_date = last_stock.stocking_date
-
-        # Create Response Object
-        pond_obj = PondResponse(
-            id=pond.id,
-            name=f"{pond.name} {fish_type}",
-            location_desc=pond.location_desc,
-            area_sqm=pond.area_sqm,
-            created_at=pond.created_at,
-            last_stocked_at=stock_date,
-            image_base64=pond.image_base64 
-        )
-        pond_obj.coordinates = coords 
-        results.append(pond_obj)
-
-    return results
-
-# 2. CREATE NEW POND (POST)
+# 2. CREATE NEW POND
 @router.post("/", response_model=PondResponse)
-def create_pond(pond_data: PondCreate, db: Session = Depends(get_db)):
+def create_pond(
+    pond_data: PondCreate, 
+    db: Session = Depends(get_db),
+    x_user_id: str = Header(...) # <--- ATTACHES USER ID TO NEW POND
+):
     try:
-        coords = pond_data.coordinates
+        # Calculate Area in Python
+        calculated_area = calculate_polygon_area(pond_data.coordinates)
         
-        if len(coords) < 3:
-            raise HTTPException(status_code=400, detail="A pond must have at least 3 points")
-
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])
-
-        flipped_coords = [(lon, lat) for lat, lon in coords]
-        shapely_poly = Polygon(flipped_coords)
-
         new_pond = Pond(
             name=pond_data.name,
             location_desc=pond_data.location_desc,
-            image_base64=pond_data.image_base64, 
-            geometry=from_shape(shapely_poly, srid=4326),
-            area_sqm=0.0 
+            image_base64=pond_data.image_base64,
+            coordinates=pond_data.coordinates, # Save JSON directly
+            area_sqm=round(calculated_area, 2),
+            owner_id=x_user_id # Save the Owner
         )
+        
         db.add(new_pond)
         db.commit()
         db.refresh(new_pond)
-
-        try:
-            sql = text("UPDATE ponds SET area_sqm = ST_Area(geometry::geography) WHERE id = :id RETURNING area_sqm")
-            result = db.execute(sql, {"id": new_pond.id})
-            calculated_area = result.scalar()
-            db.commit()
-            new_pond.area_sqm = round(calculated_area, 2)
-        except Exception:
-            new_pond.area_sqm = 0.0
-
-        new_pond.coordinates = [] 
+        
         return new_pond
 
     except Exception as e:
