@@ -12,51 +12,45 @@ router = APIRouter()
 @router.get("/summary")
 def get_analytics(
     db: Session = Depends(get_db),
-    x_user_id: str = Header(...) # <--- 1. SECURITY: Require User ID
+    x_user_id: str = Header(...) # Security: Filter by user
 ):
-    # --- STEP 1: FILTER BY USER ---
+    # 1. Get User's Ponds
     user_ponds = db.query(Pond).filter(Pond.owner_id == x_user_id).all()
     pond_ids = [p.id for p in user_ponds]
     
-    if not pond_ids:
-        return {
-            "total_ponds": 0, "total_revenue": 0, "total_harvested_kg": 0, "survival_rate": 0, 
-            "yearly_chart": {"labels": [], "data": []}, "system_recommendation": "No data yet."
-        }
+    # Defaults if no data
+    empty_stats = {
+        "total_revenue": 0, "total_kg": 0, 
+        "total_loss_qty": 0, "total_loss_kg": 0,
+        "yearly_chart": {"labels": [], "data": []}, 
+        "system_recommendation": "No data available."
+    }
 
-    # Get all stockings for this user
+    if not pond_ids:
+        return empty_stats
+
+    # Get stockings to link everything together
     stockings = db.query(StockingLog).filter(StockingLog.pond_id.in_(pond_ids)).all()
     stocking_ids = [s.id for s in stockings]
 
     if not stocking_ids:
-         return {
-            "total_ponds": len(user_ponds), "total_revenue": 0, "total_harvested_kg": 0, "survival_rate": 0,
-            "yearly_chart": {"labels": [], "data": []}, "system_recommendation": "Start stocking to see insights."
-        }
+         return empty_stats
 
-    # --- STEP 2: CALCULATE BASIC STATS (Securely) ---
+    # 2. CALCULATE METRICS
     
-    # Revenue & Weight (Join with StockingLog to filter by user)
-    # We calculate revenue manually (weight * price) to be safe if 'revenue' column is missing
+    # Revenue & Harvest Weight
     harvest_stats = db.query(
         func.sum(HarvestLog.total_weight_kg * HarvestLog.market_price_per_kg).label('revenue'),
         func.sum(HarvestLog.total_weight_kg).label('kg')
     ).filter(HarvestLog.stocking_id.in_(stocking_ids)).first()
 
-    total_revenue = harvest_stats.revenue or 0.0
-    total_harvested_kg = harvest_stats.kg or 0.0
+    # Mortality Stats (The missing piece!)
+    mortality_stats = db.query(
+        func.sum(MortalityLog.quantity_lost).label('qty'),
+        func.sum(MortalityLog.weight_lost_kg).label('kg')
+    ).filter(MortalityLog.stocking_id.in_(stocking_ids)).first()
 
-    # Survival Rate
-    total_stocked = db.query(func.sum(StockingLog.fry_quantity)).filter(StockingLog.id.in_(stocking_ids)).scalar() or 0
-    total_dead = db.query(func.sum(MortalityLog.quantity_lost)).filter(MortalityLog.stocking_id.in_(stocking_ids)).scalar() or 0
-    
-    survival_rate = 0.0
-    if total_stocked > 0:
-        survival_rate = ((total_stocked - total_dead) / total_stocked) * 100
-
-    # --- STEP 3: ADVANCED FEATURES (From your code) ---
-
-    # Yearly Chart Data (Filtered by User)
+    # 3. YEARLY CHART DATA
     yearly_data = db.query(
         extract('year', HarvestLog.harvest_date).label('year'),
         func.sum(HarvestLog.total_weight_kg).label('total_kg')
@@ -66,26 +60,26 @@ def get_analytics(
     years = [str(int(row.year)) for row in yearly_data]
     weights = [row.total_kg for row in yearly_data]
 
-    # AI Recommendation (Disaster Analysis)
+    # 4. RECOMMENDATION SYSTEM
     common_cause = db.query(
         MortalityLog.cause, func.count(MortalityLog.cause)
     ).filter(MortalityLog.stocking_id.in_(stocking_ids))\
      .group_by(MortalityLog.cause).order_by(func.count(MortalityLog.cause).desc()).first()
 
-    recommendation = "Operations are normal."
+    recommendation = "Operations are healthy."
     if common_cause:
         cause_name = common_cause[0]
-        if cause_name == "Flood": recommendation = "Priority: Upgrade dike infrastructure to prevent flood loss."
-        elif cause_name == "Disease": recommendation = "Priority: Review water quality protocol immediately."
-        elif cause_name == "Heat": recommendation = "Priority: Deepen ponds to stabilize temperature."
-        elif cause_name == "Theft": recommendation = "Priority: Increase security or install lighting."
+        if cause_name == "Flood": recommendation = "Priority: Upgrade dike infrastructure."
+        elif cause_name == "Disease": recommendation = "Priority: Review water quality protocol."
+        elif cause_name == "Heat": recommendation = "Priority: Increase water depth."
+        elif cause_name == "Theft": recommendation = "Priority: Install security lighting."
 
-    # --- STEP 4: RETURN MATCHING JSON ---
+    # 5. RETURN EXACT KEYS FOR YOUR FRONTEND
     return {
-        "total_ponds": len(user_ponds),
-        "total_revenue": round(total_revenue, 2),
-        "total_harvested_kg": round(total_harvested_kg, 2), # <--- Matches Frontend
-        "survival_rate": round(survival_rate, 1),
+        "total_revenue": harvest_stats.revenue or 0.0,
+        "total_kg": harvest_stats.kg or 0.0,            # <--- Renamed to match frontend
+        "total_loss_qty": mortality_stats.qty or 0,     # <--- Added back
+        "total_loss_kg": mortality_stats.kg or 0.0,     # <--- Added back
         "yearly_chart": {
             "labels": years,
             "data": weights
