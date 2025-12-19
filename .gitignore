@@ -3,9 +3,9 @@ __pycache__/
 .env
 *.pyc
 node_modules/
-.env
 .env.local
 *.log
 dist/
 build/
 .DS_Store
+.env

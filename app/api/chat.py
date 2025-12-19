@@ -2,6 +2,10 @@ import os
 import google.generativeai as genai
 from fastapi import APIRouter
 from pydantic import BaseModel
+from dotenv import load_dotenv  # <--- 1. IMPORT THIS
+
+# 2. LOAD THE .ENV FILE
+load_dotenv() 
 
 router = APIRouter()
 
@@ -11,22 +15,23 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
 
-# 1. SETUP GOOGLE GEMINI (The "Smart Brain")
-# PASTE YOUR API KEY HERE INSIDE THE QUOTES
-GOOGLE_API_KEY = "AIzaSyAWUE_BKu267ljWNVlu0PFfs-1UyagLAUQ"
+# 3. GET THE KEY SECURELY
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-try:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    
-    # UPDATE THIS LINE:
-    model = genai.GenerativeModel('gemini-2.5-flash') 
-    
-    print("✅ Google Gemini AI Loaded")
-except Exception as e:
-    print(f"⚠️ AI Setup Failed: {e}")
-    model = None
+model = None
 
-# 2. THE OFFLINE BACKUP (The "Safe Brain")
+# 4. INITIALIZE AI
+if GOOGLE_API_KEY:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash') 
+        print("✅ Google Gemini AI Loaded")
+    except Exception as e:
+        print(f"⚠️ AI Setup Failed: {e}")
+else:
+    print("⚠️ NO API KEY FOUND. Chat will work in Offline Mode only.")
+
+# OFFLINE BACKUP
 OFFLINE_KNOWLEDGE = {
     "green": "Green water indicates algae. Reduce feeding and turn on aerators.",
     "brown": "Brown water means mud/solids. Apply agricultural lime (apog).",
@@ -42,7 +47,6 @@ def chat_with_aquabot(request: ChatRequest):
     # PLAN A: TRY GOOGLE GEMINI (Online)
     if model:
         try:
-            # We give the AI a "Persona" so it stays on topic
             system_instruction = (
                 "You are an expert aquaculture consultant named AquaBot. "
                 "You help farmers with fish ponds, tilapia, bangus, and water quality. "
@@ -50,13 +54,10 @@ def chat_with_aquabot(request: ChatRequest):
                 "If the question is NOT about fish farming, politely refuse to answer."
                 f"\n\nUser Question: {user_msg}"
             )
-            
             response = model.generate_content(system_instruction)
             return {"response": response.text}
-            
         except Exception as e:  
             print(f"❌ GOOGLE AI CRASHED: {e}") 
-            print("⚠️ Switching to Offline Mode.")
 
     # PLAN B: FALLBACK TO DICTIONARY (Offline)
     user_msg_lower = user_msg.lower()
@@ -64,4 +65,4 @@ def chat_with_aquabot(request: ChatRequest):
         if keyword in user_msg_lower:
             return {"response": f"[Offline Mode] {answer}"}
     
-    return {"response": "I cannot reach the AI server right now, and I don't have a pre-saved answer for that. Please check your internet connection."}
+    return {"response": "I cannot reach the AI server right now. Please check your internet connection."}
