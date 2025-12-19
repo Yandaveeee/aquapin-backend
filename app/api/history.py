@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import date
 
@@ -20,6 +20,7 @@ class HistoryItem(BaseModel):
     harvest_date: date
     total_weight_kg: float
     revenue: float
+    fish_size: Optional[str] = "Standard" # <--- NEW FIELD
 
     class Config:
         from_attributes = True
@@ -46,7 +47,6 @@ def get_pond_history(
         harvest = db.query(HarvestLog).filter(HarvestLog.stocking_id == stock.id).first()
 
         if harvest:
-            # Calculate Revenue (Weight * Price)
             calculated_revenue = harvest.total_weight_kg * harvest.market_price_per_kg
             
             history_list.append({
@@ -56,7 +56,8 @@ def get_pond_history(
                 "stock_date": stock.stocking_date,
                 "harvest_date": harvest.harvest_date,
                 "total_weight_kg": harvest.total_weight_kg,
-                "revenue": calculated_revenue
+                "revenue": calculated_revenue,
+                "fish_size": harvest.fish_size # <--- ADDED THIS
             })
 
     # 4. Sort by newest harvest first
