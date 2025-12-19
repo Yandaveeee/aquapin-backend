@@ -17,7 +17,9 @@ class PondResponse(PondCreate):
     created_at: Optional[datetime] = None
     
     # 2. ADD THIS FIELD (Crucial for status to work)
-    last_stocked_at: Optional[date] = None 
+    last_stocked_at: Optional[date] = None
+
+    current_fish_type: Optional[str] = None 
 
     class Config:
         from_attributes = True

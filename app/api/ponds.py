@@ -34,7 +34,7 @@ def calculate_polygon_area(coords):
         
     return abs(area) / 2.0
 
-# 1. GET ALL PONDS (UPDATED: Now populates stocking status!)
+# 1. GET ALL PONDS (UPDATED: Now includes Fish Type!)
 @router.get("/", response_model=List[PondResponse])
 def get_all_ponds(
     db: Session = Depends(get_db), 
@@ -54,6 +54,7 @@ def get_all_ponds(
             # If NOT harvested yet, mark as active
             if not is_harvested:
                 pond.last_stocked_at = last_stock.stocking_date
+                pond.current_fish_type = last_stock.fry_type # <--- ADDED THIS
                 
     return ponds
 
@@ -86,7 +87,7 @@ def create_pond(
         print(f"SERVER ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 3. GET SINGLE POND
+# 3. GET SINGLE POND (UPDATED: Now includes Fish Type!)
 @router.get("/{pond_id}", response_model=PondResponse)
 def get_pond(
     pond_id: int, 
@@ -104,6 +105,7 @@ def get_pond(
         is_harvested = db.query(HarvestLog).filter(HarvestLog.stocking_id == last_stock.id).first()
         if not is_harvested:
             stock_date = last_stock.stocking_date
+            pond.current_fish_type = last_stock.fry_type # <--- ADDED THIS
 
     pond.last_stocked_at = stock_date
     return pond
