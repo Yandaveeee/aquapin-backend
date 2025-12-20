@@ -2,10 +2,10 @@ import os
 import google.generativeai as genai
 from fastapi import APIRouter
 from pydantic import BaseModel
-from dotenv import load_dotenv  # <--- 1. IMPORT THIS
+from dotenv import load_dotenv
 
-# 2. LOAD THE .ENV FILE
-load_dotenv() 
+# 1. LOAD ENV
+load_dotenv()
 
 router = APIRouter()
 
@@ -15,28 +15,45 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
 
-# 3. GET THE KEY SECURELY
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
 model = None
 
-# 4. INITIALIZE AI
-# ... inside chat.py ...
-
+# 2. INITIALIZE AI WITH DIAGNOSTICS
 if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         
-        # USE THIS EXACT MODEL NAME:
-        model = genai.GenerativeModel('gemini-pro')
-        
-        print("✅ Google Gemini AI Loaded")
+        # --- DIAGNOSTIC: PRINT WHAT THE KEY CAN SEE ---
+        print("🔍 DIAGNOSTIC: Checking available models for this Key...")
+        available_models = []
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    print(f"   --> Found: {m.name}")
+                    available_models.append(m.name)
+        except Exception as e:
+            print(f"   ❌ DIAGNOSTIC FAILED: API Key might be invalid. Error: {e}")
+        # -----------------------------------------------
+
+        # 3. SMART MODEL SELECTION
+        # It tries 'flash' first (fastest). If unavailable, falls back to 'pro'.
+        if 'models/gemini-1.5-flash' in available_models:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            print("✅ Loaded Model: gemini-1.5-flash")
+        elif 'models/gemini-pro' in available_models:
+            model = genai.GenerativeModel('gemini-pro')
+            print("✅ Loaded Model: gemini-pro")
+        else:
+            # If list_models failed, try Flash blindly as a last resort
+            print("⚠️ Could not verify model list. Trying Flash blindly...")
+            model = genai.GenerativeModel('gemini-1.5-flash')
+
     except Exception as e:
-        print(f"⚠️ AI Setup Failed: {e}")
+        print(f"⚠️ AI Setup Critical Failure: {e}")
 else:
     print("⚠️ NO API KEY FOUND. Chat will work in Offline Mode only.")
 
-# OFFLINE BACKUP
+# OFFLINE BACKUP DATA
 OFFLINE_KNOWLEDGE = {
     "green": "Green water indicates algae. Reduce feeding and turn on aerators.",
     "brown": "Brown water means mud/solids. Apply agricultural lime (apog).",
@@ -49,14 +66,12 @@ OFFLINE_KNOWLEDGE = {
 def chat_with_aquabot(request: ChatRequest):
     user_msg = request.message
     
-    # PLAN A: TRY GOOGLE GEMINI (Online)
+    # PLAN A: ONLINE AI
     if model:
         try:
             system_instruction = (
                 "You are an expert aquaculture consultant named AquaBot. "
-                "You help farmers with fish ponds, tilapia, bangus, and water quality. "
                 "Keep answers short, practical, and easy to understand. "
-                "If the question is NOT about fish farming, politely refuse to answer."
                 f"\n\nUser Question: {user_msg}"
             )
             response = model.generate_content(system_instruction)
@@ -64,7 +79,7 @@ def chat_with_aquabot(request: ChatRequest):
         except Exception as e:  
             print(f"❌ GOOGLE AI CRASHED: {e}") 
 
-    # PLAN B: FALLBACK TO DICTIONARY (Offline)
+    # PLAN B: OFFLINE FALLBACK
     user_msg_lower = user_msg.lower()
     for keyword, answer in OFFLINE_KNOWLEDGE.items():
         if keyword in user_msg_lower:
