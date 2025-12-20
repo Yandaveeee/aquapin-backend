@@ -15,9 +15,10 @@ class ChatResponse(BaseModel):
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- UPDATE: USE THE MODEL FOUND IN YOUR LOGS ---
-# Your logs showed you have access to 2.0, so we use that.
-MODEL_NAME = 'gemini-2.0-flash' 
+# --- FINAL FIX: USE THE STANDARD FREE MODEL ---
+# Gemini 2.0 has no free tier (Limit: 0).
+# Gemini 1.5 Flash is free (15 requests per minute).
+MODEL_NAME = 'gemini-1.5-flash'
 
 model = None
 
@@ -25,7 +26,7 @@ if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel(MODEL_NAME)
-        print(f"✅ AI Configured. Connected to: {MODEL_NAME}")
+        print(f"✅ AI Configured. Connected to Free Model: {MODEL_NAME}")
     except Exception as e:
         print(f"⚠️ AI Configuration Error: {e}")
 else:
@@ -46,14 +47,15 @@ def chat_with_aquabot(request: ChatRequest):
     # 1. TRY ONLINE AI
     if model:
         try:
-            # We use the updated model name here
             response = model.generate_content(
                 f"You are an expert aquaculture consultant named AquaBot. Keep answers short and practical. User Question: {user_msg}"
             )
             return {"response": response.text}
         except Exception as e:
-            print(f"❌ AI GENERATION FAILED: {e}")
-            # If 2.0 fails, it might be a region issue, but this is unlikely given your logs.
+            # If we hit a limit, we handle it gracefully
+            print(f"❌ AI ERROR: {e}")
+            if "429" in str(e):
+                return {"response": "I am receiving too many questions right now. Please ask again in 10 seconds."}
 
     # 2. FALLBACK TO OFFLINE
     user_msg_lower = user_msg.lower()
@@ -61,4 +63,4 @@ def chat_with_aquabot(request: ChatRequest):
         if keyword in user_msg_lower:
             return {"response": f"[Offline Mode] {answer}"}
     
-    return {"response": "I cannot reach the AI server. Please check your internet connection."}
+    return {"response": "I cannot reach the AI server right now. Please check your internet connection."}
