@@ -15,10 +15,10 @@ class ChatResponse(BaseModel):
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- FINAL FIX: USE THE STANDARD FREE MODEL ---
-# Gemini 2.0 has no free tier (Limit: 0).
-# Gemini 1.5 Flash is free (15 requests per minute).
-MODEL_NAME = 'gemini-1.5-flash'
+# --- THE FIX: USE THE GENERIC 'LATEST' ALIAS ---
+# Your logs proved that '1.5' is missing and '2.0' has no quota.
+# But 'gemini-flash-latest' WAS in your list. This is the one that works.
+MODEL_NAME = 'gemini-flash-latest'
 
 model = None
 
@@ -26,7 +26,7 @@ if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel(MODEL_NAME)
-        print(f"✅ AI Configured. Connected to Free Model: {MODEL_NAME}")
+        print(f"✅ AI Configured. Connected to: {MODEL_NAME}")
     except Exception as e:
         print(f"⚠️ AI Configuration Error: {e}")
 else:
@@ -52,8 +52,10 @@ def chat_with_aquabot(request: ChatRequest):
             )
             return {"response": response.text}
         except Exception as e:
-            # If we hit a limit, we handle it gracefully
             print(f"❌ AI ERROR: {e}")
+            # Fallback if even the latest model fails
+            if "404" in str(e):
+                 return {"response": "System Error: The AI model is unavailable. Please check Google AI Studio for a supported model name."}
             if "429" in str(e):
                 return {"response": "I am receiving too many questions right now. Please ask again in 10 seconds."}
 
