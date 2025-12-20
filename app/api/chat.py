@@ -1,32 +1,31 @@
 import os
+import io
+from PIL import Image # Import Pillow to handle images
 import google.generativeai as genai
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
 router = APIRouter()
 
-class ChatRequest(BaseModel):
-    message: str
-
+# Response model remains the same
 class ChatResponse(BaseModel):
     response: str
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- THE FIX: USE THE GENERIC 'LATEST' ALIAS ---
-# Your logs proved that '1.5' is missing and '2.0' has no quota.
-# But 'gemini-flash-latest' WAS in your list. This is the one that works.
+# We stick with the model that worked for you
 MODEL_NAME = 'gemini-flash-latest'
 
 model = None
 
+# --- AI SETUP ---
 if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel(MODEL_NAME)
-        print(f"✅ AI Configured. Connected to: {MODEL_NAME}")
+        print(f"✅ AI Vision Ready. Connected to: {MODEL_NAME}")
     except Exception as e:
         print(f"⚠️ AI Configuration Error: {e}")
 else:
@@ -40,26 +39,63 @@ OFFLINE_KNOWLEDGE = {
     "growth": "For faster growth, use high-protein feed and maintain high oxygen levels."
 }
 
+# --- THE NEW VISION API ENDPOINT ---
+# Note: We changed from JSON body to Form data and File upload
 @router.post("/", response_model=ChatResponse)
-def chat_with_aquabot(request: ChatRequest):
-    user_msg = request.message
-    
-    # 1. TRY ONLINE AI
+async def chat_with_aquabot(
+    message: str = Form(...),           # Accepts text part of form
+    image: UploadFile = File(None)      # Accepts optional file upload
+):
+    """
+    Analyzes text AND optional image inputs.
+    """
+    user_msg = message
+    pil_image = None
+
+    # 1. Process Image if uploaded
+    if image:
+        try:
+            # Read the uploaded file bytes
+            contents = await image.read()
+            # Convert bytes to a PIL Image object that Gemini understands
+            pil_image = Image.open(io.BytesIO(contents))
+            print(f"📸 Image received: {image.filename}")
+        except Exception as e:
+            print(f"❌ Image processing failed: {e}")
+            raise HTTPException(status_code=400, detail="Invalid image file.")
+
+    # 2. TRY ONLINE AI (VISION OR TEXT)
     if model:
         try:
-            response = model.generate_content(
-                f"You are an expert aquaculture consultant named AquaBot. Keep answers short and practical. User Question: {user_msg}"
-            )
+            system_instruction = "You are an expert aquaculture consultant named AquaBot. Keep answers short and practical."
+            
+            # Prepare input for Gemini
+            prompt_parts = [system_instruction]
+            if pil_image:
+                prompt_parts.append("Analyze this image based on the user's question.")
+                prompt_parts.append(pil_image) # Add the image directly
+            prompt_parts.append(f"User Question: {user_msg}")
+
+            print("🤔 Sending to AI...")
+            # Generate content with text and image parts
+            response = model.generate_content(prompt_parts)
             return {"response": response.text}
+            
         except Exception as e:
             print(f"❌ AI ERROR: {e}")
-            # Fallback if even the latest model fails
-            if "404" in str(e):
-                 return {"response": "System Error: The AI model is unavailable. Please check Google AI Studio for a supported model name."}
-            if "429" in str(e):
-                return {"response": "I am receiving too many questions right now. Please ask again in 10 seconds."}
+            error_str = str(e)
+            if "404" in error_str:
+                 return {"response": "System Error: AI Model not found."}
+            if "429" in error_str:
+                return {"response": "I am busy right now. Please ask in 10 seconds."}
+            # If it's a safety block on the image
+            if "finish_reason" in error_str and "SAFETY" in error_str:
+                 return {"response": "I cannot analyze that image due to safety guidelines."}
 
-    # 2. FALLBACK TO OFFLINE
+    # 3. FALLBACK TO OFFLINE (Text only)
+    if pil_image:
+         return {"response": "[Offline Mode] I cannot analyze images while offline."}
+
     user_msg_lower = user_msg.lower()
     for keyword, answer in OFFLINE_KNOWLEDGE.items():
         if keyword in user_msg_lower:
