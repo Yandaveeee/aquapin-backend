@@ -21,10 +21,15 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 model = None
 
 # 4. INITIALIZE AI
+# ... inside chat.py ...
+
 if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-pro') 
+        
+        # USE THIS EXACT MODEL NAME:
+        model = genai.GenerativeModel('gemini-1.5-flash') 
+        
         print("✅ Google Gemini AI Loaded")
     except Exception as e:
         print(f"⚠️ AI Setup Failed: {e}")
