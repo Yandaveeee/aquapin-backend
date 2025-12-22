@@ -7,5 +7,6 @@ from .pond import Pond
 from .harvest import HarvestLog
 from .stocking import StockingLog
 from .mortality import MortalityLog
+from .chat import ChatHistory
 
 # This file now correctly exposes all your tables to main.py
