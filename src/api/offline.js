@@ -1,14 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import client from './client'; // <--- Added import so Sync works automatically
+import * as Location from 'expo-location'; // <--- NEW IMPORT for fixing addresses
+import client from './client';
 
 const QUEUE_KEY = 'OFFLINE_ACTION_QUEUE';
 
-// 1. Check Internet Connection (UPDATED FIX)
+// 1. Check Internet Connection
 export const isOnline = async () => {
   const state = await NetInfo.fetch();
-  // FIX: Only check if connected to Wi-Fi/Data. 
-  // We remove 'isInternetReachable' because it often fails on local networks.
   return state.isConnected; 
 };
 
@@ -28,18 +27,16 @@ export const getSmartData = async (key, apiCall) => {
   if (online) {
     try {
       const response = await apiCall();
-      await cacheData(key, response.data); // Save fresh data
+      await cacheData(key, response.data); 
       return response.data;
     } catch (error) {
       console.log(`⚠️ Network failed for ${key}. Falling back to cache.`);
-      // Optional: Log real error for debugging
       if (error.response) console.log("Server Error:", error.response.status);
     }
   } else {
-    console.log(`📱 Offline (or Local Network). Loading ${key} from cache.`);
+    console.log(`📱 Offline. Loading ${key} from cache.`);
   }
 
-  // Fallback: Load from storage
   const cached = await AsyncStorage.getItem(key);
   return cached ? JSON.parse(cached) : null;
 };
@@ -59,11 +56,10 @@ export const queueAction = async (endpoint, payload) => {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 };
 
-// 5. Sync: Upload all queued data
+// 5. Sync: Upload all queued data (WITH ADDRESS FIXER)
 export const syncData = async () => {
-  // Check connection using our relaxed rule
   const online = await isOnline();
-  if (!online) return { success: false, message: "No Wi-Fi Connection" };
+  if (!online) return { success: false, message: "No Internet Connection" };
 
   const json = await AsyncStorage.getItem(QUEUE_KEY);
   const queue = json ? JSON.parse(json) : [];
@@ -73,17 +69,47 @@ export const syncData = async () => {
   const failedItems = [];
   let successCount = 0;
 
+  console.log(`🔄 Starting Sync for ${queue.length} items...`);
+
   for (const item of queue) {
     try {
+      // --- START: AUTO-FIX ADDRESS LOGIC ---
+      // If this is a Pond Save AND it has the "Offline" placeholder text...
+      if (item.endpoint.includes('/ponds/') && 
+          item.payload.location_desc === "Pinned Location (Offline)" &&
+          item.payload.coordinates && 
+          item.payload.coordinates.length > 0) {
+        
+        console.log(`📍 Fixing address for item ${item.id}...`);
+        
+        // Get the first coordinate point [lat, lng]
+        const [lat, lng] = item.payload.coordinates[0];
+        
+        // Ask Google/Expo for the real name now that we are online
+        const addressList = await Location.reverseGeocodeAsync({ 
+            latitude: lat, 
+            longitude: lng 
+        });
+
+        if (addressList.length > 0) {
+           const addr = addressList[0];
+           // Update the payload with the real city/region
+           item.payload.location_desc = `${addr.city || addr.subregion || ''}, ${addr.region || addr.country || ''}`;
+           console.log("   ✅ Address updated to:", item.payload.location_desc);
+        }
+      }
+      // --- END: AUTO-FIX ADDRESS LOGIC ---
+
+      // Send the (potentially updated) item to the server
       await client.post(item.endpoint, item.payload);
       successCount++;
+      
     } catch (error) {
-      console.error("❌ Sync Failed for item:", item);
+      console.error("❌ Sync Failed for item:", item.id);
       if (error.response) {
           console.error("   Server replied:", error.response.status);
-          console.error("   Server message:", error.response.data);
       } else {
-          console.error("   Network/Connection Error:", error.message);
+          console.error("   Network Error:", error.message);
       }
       failedItems.push(item); 
     }
@@ -97,6 +123,7 @@ export const syncData = async () => {
     message: `Synced ${successCount} items. ${failedItems.length} failed.` 
   };
 };
+
 export const clearQueue = async () => {
   await AsyncStorage.removeItem(QUEUE_KEY);
 };

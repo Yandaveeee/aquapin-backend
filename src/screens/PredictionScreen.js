@@ -1,9 +1,24 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, FlatList, Alert } from 'react-native';
+import { 
+    View, 
+    Text, 
+    TextInput, 
+    Button, 
+    StyleSheet, 
+    ScrollView, 
+    ActivityIndicator, 
+    TouchableOpacity, 
+    FlatList, 
+    Alert,
+    KeyboardAvoidingView, 
+    Platform,
+    Image 
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker'; 
 import client from '../api/client';
-// 1. IMPORT OFFLINE HELPER
 import { isOnline } from '../api/offline';
+import { sendToAquaBot } from '../api/chat'; 
 
 export default function PredictionScreen() {
   const [mode, setMode] = useState('advisor'); 
@@ -17,16 +32,16 @@ export default function PredictionScreen() {
 
   // --- CHAT STATE ---
   const [messages, setMessages] = useState([
-    { id: 1, text: "Hello! I am AquaBot. Ask me anything about fisheries/ponds", sender: 'bot' }
+    { id: 1, text: "Hello! I am AquaBot. Ask me anything about fisheries, or send a photo of your pond!", sender: 'bot' }
   ]);
   const [inputText, setInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null); 
 
   // --- HANDLER: CALCULATOR ---
   const handlePredict = async () => {
     if (!area || !fry || !days) return;
 
-    // Check internet first
     const online = await isOnline();
     if (!online) {
         Alert.alert("Offline", "Prediction requires an internet connection.");
@@ -45,11 +60,34 @@ export default function PredictionScreen() {
     }
   };
 
+  // --- NEW: PICK IMAGE FUNCTION ---
+  const pickImage = async () => {
+    console.log("📸 Camera Button Pressed!"); 
+
+    try {
+        // --- COMPATIBILITY FIX ---
+        // We use 'MediaTypeOptions' because your installed library version requires it.
+        // If we use 'MediaType', the app crashes.
+        let result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.5,
+        });
+
+        if (!result.canceled) {
+          setSelectedImage(result.assets[0]);
+        }
+    } catch (error) {
+        console.log("Error picking image:", error);
+        alert("Could not open gallery.");
+    }
+  };
+
   // --- HANDLER: CHAT ---
   const sendMessage = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() && !selectedImage) return;
 
-    // Check internet first
     const online = await isOnline();
     if (!online) {
         const errorMsg = { id: Date.now(), text: "I need an internet connection to answer that.", sender: 'bot' };
@@ -58,18 +96,28 @@ export default function PredictionScreen() {
         return;
     }
 
-    // 1. Add User Message
-    const newMsg = { id: Date.now(), text: inputText, sender: 'user' };
+    // 1. Add User Message to Chat
+    const newMsg = { 
+        id: Date.now(), 
+        text: inputText, 
+        image: selectedImage ? selectedImage.uri : null, 
+        sender: 'user' 
+    };
+    
     setMessages(prev => [...prev, newMsg]);
-    setInputText('');
     setChatLoading(true);
+    
+    // Clear input immediately
+    const textToSend = inputText;
+    const imageToSend = selectedImage;
+    setInputText('');
+    setSelectedImage(null);
 
     try {
       // 2. Send to Backend
-      const response = await client.post('/api/chat/', { message: newMsg.text });
-      
-      // 3. Add Bot Response
-      const botMsg = { id: Date.now() + 1, text: response.data.response, sender: 'bot' };
+      const botReplyText = await sendToAquaBot(textToSend, imageToSend);
+
+      const botMsg = { id: Date.now() + 1, text: botReplyText, sender: 'bot' };
       setMessages(prev => [...prev, botMsg]);
 
     } catch (error) {
@@ -109,19 +157,39 @@ export default function PredictionScreen() {
             styles.msgBubble, 
             item.sender === 'user' ? styles.userBubble : styles.botBubble
           ]}>
+            {/* Show Image if User Sent one */}
+            {item.image && (
+                <Image source={{ uri: item.image }} style={styles.chatImage} />
+            )}
             <Text style={item.sender === 'user' ? styles.userText : styles.botText}>{item.text}</Text>
           </View>
         )}
       />
+
+      {/* Preview Image before sending */}
+      {selectedImage && (
+          <View style={styles.previewContainer}>
+              <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} />
+              <TouchableOpacity onPress={() => setSelectedImage(null)} style={styles.removePreview}>
+                  <Ionicons name="close-circle" size={24} color="red" />
+              </TouchableOpacity>
+          </View>
+      )}
+
       <View style={styles.chatInputContainer}>
+        {/* Camera Button */}
+        <TouchableOpacity onPress={pickImage} style={styles.iconBtn}>
+            <Ionicons name="camera" size={24} color="#007AFF" />
+        </TouchableOpacity>
+
         <TextInput 
             style={styles.chatInput} 
-            placeholder="Ask a question..." 
+            placeholder={selectedImage ? "Add a caption..." : "Ask a question..."}
             value={inputText}
             onChangeText={setInputText} 
         />
         <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}>
-            <Ionicons name="send" size={20} color="white" />
+            {chatLoading ? <ActivityIndicator color="white" size="small" /> : <Ionicons name="send" size={20} color="white" />}
         </TouchableOpacity>
       </View>
     </View>
@@ -137,7 +205,14 @@ export default function PredictionScreen() {
             <Text style={[styles.tabText, mode === 'calculator' && styles.activeTabText]}>🧮 Calculator</Text>
         </TouchableOpacity>
       </View>
-      {mode === 'calculator' ? renderCalculator() : renderChat()}
+
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0} 
+      >
+        {mode === 'calculator' ? renderCalculator() : renderChat()}
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -154,12 +229,28 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 5, backgroundColor: 'white', marginBottom: 15 },
   resultCard: { marginTop: 20, padding: 20, backgroundColor: '#E3F2FD', borderRadius: 10, borderWidth: 1, borderColor: '#2196F3' },
   resultTitle: { fontSize: 18, fontWeight: 'bold' },
+  
+  // Chat Styles
   msgBubble: { maxWidth: '80%', padding: 12, borderRadius: 15, marginBottom: 10 },
   userBubble: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
   botBubble: { alignSelf: 'flex-start', backgroundColor: '#E0E0E0' },
   userText: { color: 'white' },
   botText: { color: '#333' },
-  chatInputContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', borderTopWidth: 1, borderColor: '#eee' },
-  chatInput: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 20, paddingHorizontal: 15, marginRight: 10 },
-  sendBtn: { backgroundColor: '#007AFF', padding: 10, borderRadius: 50 }
+  chatInputContainer: { flexDirection: 'row', padding: 10, backgroundColor: 'white', borderTopWidth: 1, borderColor: '#eee', alignItems: 'center' },
+  chatInput: { flex: 1, backgroundColor: '#f0f0f0', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, marginRight: 10, height: 40 },
+  sendBtn: { backgroundColor: '#007AFF', padding: 10, borderRadius: 50, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  
+  // --- UPDATED BUTTON STYLE ---
+  iconBtn: { 
+    marginRight: 10, 
+    padding: 10,       
+    backgroundColor: '#E3F2FD', 
+    borderRadius: 50,  
+  },
+
+  // New Image Styles
+  chatImage: { width: 200, height: 150, borderRadius: 10, marginBottom: 5 },
+  previewContainer: { flexDirection: 'row', padding: 10, backgroundColor: '#eee', alignItems: 'center' },
+  previewImage: { width: 50, height: 50, borderRadius: 5, marginRight: 10 },
+  removePreview: { marginLeft: 'auto' }
 });

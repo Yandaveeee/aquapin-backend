@@ -8,6 +8,9 @@ import {
   TextInput,
   TouchableOpacity,
   Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from "react-native";
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
@@ -16,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import client from "../api/client";
 import { isOnline, queueAction, getSmartData } from '../api/offline';
 
-export default function PondMapperScreen() {
+export default function PondMapperScreen({ navigation }) {
   const mapRef = useRef(null);
 
   // Default to Cagayan
@@ -62,20 +65,11 @@ export default function PondMapperScreen() {
           },
           (location) => {
             const { latitude, longitude, accuracy } = location.coords;
-            
-            // UPDATE DEBUG TEXT
             setGpsDebug(`Lat: ${latitude.toFixed(5)}\nLng: ${longitude.toFixed(5)}\nAccuracy: ${accuracy?.toFixed(1)} meters`);
-
-            const userRegion = {
-              latitude: latitude,
-              longitude: longitude,
-              latitudeDelta: 0.002,
-              longitudeDelta: 0.002,
-            };
 
             // Only move camera if not drawing
             if (!isDrawing && mapRef.current) {
-               // mapRef.current.animateToRegion(userRegion, 1000); 
+               // mapRef.current.animateToRegion(...) 
             }
           }
         );
@@ -153,8 +147,14 @@ export default function PondMapperScreen() {
   };
 
   const savePond = async () => {
-    if (coordinates.length < 3) { Alert.alert("Error", "Draw 3 corners."); return; }
-    if (!pondName.trim()) { Alert.alert("Missing Name"); return; }
+    if (coordinates.length < 3) { 
+      Alert.alert("Error", "Draw at least 3 corners."); 
+      return; 
+    }
+    if (!pondName.trim()) { 
+      Alert.alert("Missing Name", "Please give your pond a name."); 
+      return; 
+    }
 
     const cleanCoordinates = coordinates.map((c) => {
         const lat = c.latitude !== undefined ? c.latitude : c[0];
@@ -171,7 +171,7 @@ export default function PondMapperScreen() {
         const addressList = await Location.reverseGeocodeAsync(firstPoint);
         if (addressList.length > 0) {
           const addr = addressList[0];
-          addressString = `${addr.city || addr.subregion}, ${addr.region || addr.country}`;
+          addressString = `${addr.city || addr.subregion || ''}, ${addr.region || addr.country || ''}`;
         }
       } catch (e) { console.log("Geocode failed"); }
     }
@@ -187,88 +187,126 @@ export default function PondMapperScreen() {
       try {
         const response = await client.post("/api/ponds/", payload);
         Alert.alert("Success", `Saved! Size: ${response.data.area_sqm} sqm`);
-        setCoordinates([]); setPondName(""); setPondImage(null); setIsDrawing(false); fetchPonds();
-      } catch (error) { Alert.alert("Error", "Could not save."); }
+        
+        setCoordinates([]); 
+        setPondName(""); 
+        setPondImage(null); 
+        setIsDrawing(false); 
+        fetchPonds(); 
+
+      } catch (error) {
+        console.error("Save Error:", error);
+        const serverMessage = error.response?.data?.detail 
+          ? JSON.stringify(error.response.data.detail) 
+          : error.message;
+        Alert.alert("Save Failed", serverMessage);
+      }
     } else {
       try {
         await queueAction("/api/ponds/", payload);
-        Alert.alert("Saved Offline", "Will sync later.");
+        Alert.alert("Saved Offline", "Will sync when internet returns.");
         setCoordinates([]); setPondName(""); setPondImage(null); setIsDrawing(false);
-      } catch (e) { Alert.alert("Error", "Could not save offline."); }
+      } catch (e) { 
+        Alert.alert("Error", "Could not save offline."); 
+      }
     }
   };
 
   return (
-    <View style={styles.container}>
-      {/* --- DEBUG BOX (NEW) --- */}
-      <View style={styles.debugBox}>
-        <Text style={styles.debugText}>{gpsDebug}</Text>
-      </View>
-
-      {!isDrawing && (
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search location..."
-            value={searchText}
-            onChangeText={setSearchText}
-            onSubmitEditing={handleSearch}
-          />
-          <TouchableOpacity onPress={handleSearch} style={styles.searchBtn}>
-            <Ionicons name="search" size={20} color="white" />
-          </TouchableOpacity>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+    >
+      <View style={styles.container}>
+        {/* --- DEBUG BOX --- */}
+        <View style={styles.debugBox}>
+          <Text style={styles.debugText}>{gpsDebug}</Text>
         </View>
-      )}
 
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={region} 
-        onPress={handleMapPress}
-        mapType="hybrid"
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-        showsCompass={true}
-      >
-        {savedPonds.map((pond) => (
-          <Polygon
-            key={pond.id}
-            coordinates={pond.coordinates.map((c) => ({ latitude: c[0], longitude: c[1] }))}
-            fillColor="rgba(0, 255, 0, 0.4)"
-            strokeColor="rgba(255,255,255,0.8)"
-            strokeWidth={2}
-            tappable={true}
-            onPress={() => !isDrawing && Alert.alert("Pond Info", `${pond.name}\n${pond.area_sqm} sqm`)}
-          />
-        ))}
-
-        {coordinates.length > 0 && (
-          <Polygon coordinates={coordinates} fillColor="rgba(0, 200, 255, 0.5)" strokeColor="rgba(0, 0, 255, 0.5)" />
-        )}
-        {coordinates.map((marker, index) => (
-          <Marker key={index} coordinate={marker} />
-        ))}
-      </MapView>
-
-      <View style={styles.controls}>
-        {!isDrawing ? (
-          <Button title=" + Add New Pond " onPress={() => setIsDrawing(true)} color="#007AFF" />
-        ) : (
-          <View style={styles.formContainer}>
-            <Text style={styles.instruction}>Tap map to draw corners</Text>
-            <TextInput style={styles.input} placeholder="Pond Name" value={pondName} onChangeText={setPondName} />
-            <TouchableOpacity onPress={takePhoto} style={styles.photoBtn}>
-              <Text>{pondImage ? "✅ Photo Attached" : "📷 Attach Photo"}</Text>
+        {!isDrawing && (
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search location..."
+              value={searchText}
+              onChangeText={setSearchText}
+              onSubmitEditing={handleSearch}
+            />
+            <TouchableOpacity onPress={handleSearch} style={styles.searchBtn}>
+              <Ionicons name="search" size={20} color="white" />
             </TouchableOpacity>
-            <View style={styles.buttons}>
-              <Button title="Cancel" onPress={() => { setIsDrawing(false); setCoordinates([]); }} color="red" />
-              <Button title="Save" onPress={savePond} color="green" />
-            </View>
           </View>
         )}
+
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          provider={PROVIDER_GOOGLE}
+          initialRegion={region} 
+          onPress={handleMapPress}
+          mapType="hybrid"
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          showsCompass={true}
+        >
+          {savedPonds.map((pond) => (
+            <Polygon
+              key={pond.id}
+              coordinates={pond.coordinates.map((c) => ({ latitude: c[0], longitude: c[1] }))}
+              fillColor="rgba(0, 255, 0, 0.4)"
+              strokeColor="rgba(255,255,255,0.8)"
+              strokeWidth={2}
+              tappable={true}
+              onPress={() => {
+                if (!isDrawing) {
+                  console.log("Navigating to pond:", pond.id);
+                  navigation.navigate("PondDetail", { pond: pond });
+                }
+              }}
+            />
+          ))}
+
+          {coordinates.length > 0 && (
+            <Polygon coordinates={coordinates} fillColor="rgba(0, 200, 255, 0.5)" strokeColor="rgba(0, 0, 255, 0.5)" />
+          )}
+          {coordinates.map((marker, index) => (
+            <Marker key={index} coordinate={marker} />
+          ))}
+        </MapView>
+
+        {/* --- FIXED CONTROLS SECTION --- */}
+        <View style={styles.controls}>
+          {!isDrawing ? (
+            <Button title=" + Add New Pond " onPress={() => setIsDrawing(true)} color="#007AFF" />
+          ) : (
+            <ScrollView 
+              style={styles.formScrollView}
+              contentContainerStyle={styles.formContainer}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.instruction}>Tap map to draw corners</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="Pond Name" 
+                value={pondName} 
+                onChangeText={setPondName}
+                returnKeyType="done"
+                blurOnSubmit={true}
+              />
+              <TouchableOpacity onPress={takePhoto} style={styles.photoBtn}>
+                <Text>{pondImage ? "✅ Photo Attached" : "📷 Attach Photo"}</Text>
+              </TouchableOpacity>
+              <View style={styles.buttons}>
+                <Button title="Cancel" onPress={() => { setIsDrawing(false); setCoordinates([]); }} color="red" />
+                <Button title="Save" onPress={savePond} color="green" />
+              </View>
+            </ScrollView>
+          )}
+        </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -277,7 +315,7 @@ const styles = StyleSheet.create({
   map: { width: "100%", height: "100%" },
   debugBox: {
     position: 'absolute',
-    top: 30, // Adjust if you have a notch
+    top: 30,
     left: 10,
     zIndex: 20,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -285,13 +323,84 @@ const styles = StyleSheet.create({
     borderRadius: 8
   },
   debugText: { color: '#00FF00', fontSize: 12, fontWeight: 'bold' },
-  controls: { position: "absolute", bottom: 30, width: "100%", alignItems: "center", paddingHorizontal: 20 },
-  searchContainer: { position: "absolute", top: 100, left: 20, right: 20, zIndex: 10, flexDirection: "row", backgroundColor: "white", borderRadius: 8, elevation: 5 },
+  
+  // UPDATED CONTROLS STYLE
+  controls: { 
+    position: "absolute", 
+    bottom: 20, 
+    left: 20,
+    right: 20,
+    maxHeight: '40%', // Limit height so it doesn't cover too much map
+    zIndex: 10
+  },
+
+  searchContainer: { 
+    position: "absolute", 
+    top: 100, 
+    left: 20, 
+    right: 20, 
+    zIndex: 10, 
+    flexDirection: "row", 
+    backgroundColor: "white", 
+    borderRadius: 8, 
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
   searchInput: { flex: 1, padding: 10, fontSize: 16 },
-  searchBtn: { backgroundColor: "#007AFF", padding: 10, borderTopRightRadius: 8, borderBottomRightRadius: 8, justifyContent: "center" },
-  formContainer: { backgroundColor: "white", padding: 15, borderRadius: 15, width: "100%", elevation: 5 },
-  instruction: { textAlign: "center", color: "#666", marginBottom: 10, fontSize: 12 },
-  input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 10, marginBottom: 10, fontSize: 16, backgroundColor: "#f9f9f9" },
-  photoBtn: { backgroundColor: "#eee", padding: 10, borderRadius: 8, marginBottom: 10, alignItems: "center" },
-  buttons: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
+  searchBtn: { 
+    backgroundColor: "#007AFF", 
+    padding: 10, 
+    borderTopRightRadius: 8, 
+    borderBottomRightRadius: 8, 
+    justifyContent: "center" 
+  },
+  
+  formScrollView: {
+    maxHeight: '100%',
+  },
+  
+  formContainer: { 
+    backgroundColor: "white", 
+    padding: 15, 
+    borderRadius: 15, 
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  
+  instruction: { 
+    textAlign: "center", 
+    color: "#666", 
+    marginBottom: 10, 
+    fontSize: 12 
+  },
+  
+  input: { 
+    borderWidth: 1, 
+    borderColor: "#ddd", 
+    borderRadius: 8, 
+    padding: 10, 
+    marginBottom: 10, 
+    fontSize: 16, 
+    backgroundColor: "#f9f9f9" 
+  },
+  
+  photoBtn: { 
+    backgroundColor: "#eee", 
+    padding: 10, 
+    borderRadius: 8, 
+    marginBottom: 10, 
+    alignItems: "center" 
+  },
+  
+  buttons: { 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    gap: 10 
+  },
 });

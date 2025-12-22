@@ -1,12 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView } from 'react-native';
-// 1. If this import fails, the app crashes. Make sure you ran the npm install command!
+import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity } from 'react-native';
 import { Picker } from '@react-native-picker/picker'; 
 import client from '../api/client';
 import { isOnline, queueAction, getSmartData } from '../api/offline';
 
-export default function HarvestFormScreen() {
+// 1. ACCEPT PROPS (route, navigation)
+export default function HarvestFormScreen({ route, navigation }) {
+  
+  // 2. GET POND ID FROM NAVIGATION
+  const { pondId } = route.params || {};
+
   const [activeStockings, setActiveStockings] = useState([]);
   const [selectedStockId, setSelectedStockId] = useState(null);
   
@@ -17,18 +21,24 @@ export default function HarvestFormScreen() {
 
   const fetchActiveStockings = async () => {
     try {
-      // Use the smart data fetcher
       const data = await getSmartData('ACTIVE_STOCK_CACHE', () => client.get('/api/stocking/active'));
       
-      // 2. SAFETY CHECK: Ensure data is actually an Array before using it
       if (Array.isArray(data)) {
-        setActiveStockings(data);
-        if (data.length > 0 && !selectedStockId) {
-          setSelectedStockId(data[0].id);
+        // 3. FILTER LOGIC (CRITICAL FIX)
+        // Only show fish belonging to the current pond
+        let filteredData = data;
+        if (pondId) {
+            filteredData = data.filter(item => item.pond_id === parseInt(pondId));
+        }
+
+        setActiveStockings(filteredData);
+        
+        // Auto-select the first option
+        if (filteredData.length > 0) {
+          setSelectedStockId(filteredData[0].id);
         }
       } else {
-        console.log("Data is not an array:", data);
-        setActiveStockings([]); // Set to empty to prevent crash
+        setActiveStockings([]); 
       }
     } catch (e) {
       console.log("Error loading stockings:", e);
@@ -58,29 +68,33 @@ export default function HarvestFormScreen() {
     if (online) {
         try {
             const response = await client.post('/api/harvest/', payload);
-            Alert.alert("✅ Harvest Recorded!", `Profit: ₱${response.data.revenue?.toLocaleString()}`);
-            setWeight('');
-            setPrice('');
-            fetchActiveStockings(); 
+            Alert.alert(
+              "✅ Harvest Recorded!", 
+              `Profit: ₱${response.data.revenue?.toLocaleString()}`,
+              [
+                { text: "OK", onPress: () => navigation.goBack() } // Go back to refresh dashboard
+              ]
+            );
         } catch (error) {
             console.log(error);
             Alert.alert("Error", "Server Error. Try again.");
         }
     } else {
         await queueAction('/api/harvest/', payload);
-        Alert.alert("Saved Offline ☁️", "Harvest saved to device. Don't forget to Sync later!");
-        setWeight('');
-        setPrice('');
+        Alert.alert("Saved Offline ☁️", "Harvest saved. Sync later!", [
+            { text: "OK", onPress: () => navigation.goBack() }
+        ]);
     }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.header}>Harvest Record</Text>
+
+      {/* CONFIRMATION OF POND ID */}
+      {pondId && <Text style={styles.subHeader}>Harvesting Pond ID: {pondId}</Text>}
       
       <Text style={styles.label}>Select Batch to Harvest:</Text>
       <View style={styles.pickerContainer}>
-        {/* 3. SAFETY CHECK: Only show picker if we have items */}
         {activeStockings.length > 0 ? (
             <Picker selectedValue={selectedStockId} onValueChange={(itemValue) => setSelectedStockId(itemValue)}>
                 {activeStockings.map((stock) => (
@@ -88,8 +102,8 @@ export default function HarvestFormScreen() {
                 ))}
             </Picker>
         ) : (
-            <Text style={{padding: 15, color: '#666'}}>
-               {activeStockings.length === 0 ? "Loading or No Active Batches..." : "No active fish batches found."}
+            <Text style={{padding: 15, color: '#666', textAlign: 'center'}}>
+               {pondId ? "No active fish in this pond." : "No active fish batches found."}
             </Text>
         )}
       </View>
@@ -113,15 +127,17 @@ export default function HarvestFormScreen() {
       </View>
       
       <View style={styles.btnContainer}>
-        <Button title="Save Harvest" onPress={handleSave} color="green" disabled={activeStockings.length === 0} />
+        <Button title="Save Harvest & Close Cycle" onPress={handleSave} color="green" disabled={activeStockings.length === 0} />
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 50 },
-  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  container: { padding: 20, paddingTop: 40 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  header: { fontSize: 24, fontWeight: 'bold', color: 'green', marginLeft: 10 },
+  subHeader: { fontSize: 14, color: '#666', marginBottom: 20, marginLeft: 34 },
   label: { fontSize: 16, marginBottom: 5, marginTop: 10, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 5, fontSize: 16, backgroundColor: '#fff' },
   pickerContainer: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, marginBottom: 5, backgroundColor: '#fff', overflow: 'hidden' },

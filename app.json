@@ -38,6 +38,16 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -75,8 +85,14 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "7ba7195a-5e89-45fd-a8de-28108580511f"
+        "projectId": "7ac4118e-82f6-4679-aefb-2eb0d9e2ec0a"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7ac4118e-82f6-4679-aefb-2eb0d9e2ec0a"
     }
   }
 }
