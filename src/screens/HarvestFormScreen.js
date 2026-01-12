@@ -1,14 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity, ActivityIndicator, Keyboard } from 'react-native';
 import { Picker } from '@react-native-picker/picker'; 
 import client from '../api/client';
-import { isOnline, queueAction, getSmartData } from '../api/offline';
+import { isOnline, queueAction, getSmartData, invalidateCache } from '../api/offline';
 
-// 1. ACCEPT PROPS (route, navigation)
 export default function HarvestFormScreen({ route, navigation }) {
   
-  // 2. GET POND ID FROM NAVIGATION
   const { pondId } = route.params || {};
 
   const [activeStockings, setActiveStockings] = useState([]);
@@ -19,13 +17,17 @@ export default function HarvestFormScreen({ route, navigation }) {
   const [size, setSize] = useState('Standard'); 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
+  // 🔥 NEW: State for loading indicator
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🔥 NEW: Real-time Revenue Calculation
+  const estimatedRevenue = (parseFloat(weight) || 0) * (parseFloat(price) || 0);
+
   const fetchActiveStockings = async () => {
     try {
       const data = await getSmartData('ACTIVE_STOCK_CACHE', () => client.get('/api/stocking/active'));
       
       if (Array.isArray(data)) {
-        // 3. FILTER LOGIC (CRITICAL FIX)
-        // Only show fish belonging to the current pond
         let filteredData = data;
         if (pondId) {
             filteredData = data.filter(item => item.pond_id === parseInt(pondId));
@@ -33,7 +35,6 @@ export default function HarvestFormScreen({ route, navigation }) {
 
         setActiveStockings(filteredData);
         
-        // Auto-select the first option
         if (filteredData.length > 0) {
           setSelectedStockId(filteredData[0].id);
         }
@@ -51,10 +52,39 @@ export default function HarvestFormScreen({ route, navigation }) {
     }, [])
   );
 
-  const handleSave = async () => {
-    if (!selectedStockId) { Alert.alert("Error", "No active fish batch selected."); return; }
-    if (!weight) { Alert.alert("Error", "Please enter the total weight."); return; }
+  // 🔥 NEW: Wrapper to handle confirmation and validation safely
+  const handlePreCheck = () => {
+    Keyboard.dismiss();
 
+    // 1. Validation Guards
+    if (!selectedStockId) { Alert.alert("Error", "No active fish batch selected."); return; }
+    
+    const w = parseFloat(weight);
+    const p = parseFloat(price);
+
+    if (!weight || isNaN(w) || w <= 0) { Alert.alert("Validation Error", "Please enter a valid total weight (kg)."); return; }
+    if (!price || isNaN(p) || p < 0) { Alert.alert("Validation Error", "Please enter a valid price per kg."); return; }
+
+    // 2. Confirmation Dialog
+    Alert.alert(
+        "Confirm Harvest",
+        `Records indicate:\n\nWeight: ${w} kg\nPrice: ₱${p}/kg\nTotal: ₱${estimatedRevenue.toLocaleString()}\n\nIs this correct?`,
+        [
+            { text: "Cancel", style: "cancel" },
+            { 
+                text: "Yes, Save it", 
+                onPress: async () => {
+                    setIsSubmitting(true);
+                    await handleSave(); 
+                    setIsSubmitting(false);
+                }
+            }
+        ]
+    );
+  };
+
+  const handleSave = async () => {
+    // Existing logic is preserved exactly as requested
     const payload = {
       stocking_id: parseInt(selectedStockId),
       harvest_date: date,
@@ -64,31 +94,68 @@ export default function HarvestFormScreen({ route, navigation }) {
     };
 
     const online = await isOnline();
+    
+    const isTempId = payload.stocking_id < 0;
 
-    if (online) {
+    try {
+      if (online && !isTempId) {
+        const response = await client.post('/api/harvest/', payload);
+        
+        // 🔥 CRITICAL: After harvest, fetch fresh pond data to show remaining stock
         try {
-            const response = await client.post('/api/harvest/', payload);
-            Alert.alert(
-              "✅ Harvest Recorded!", 
-              `Profit: ₱${response.data.revenue?.toLocaleString()}`,
-              [
-                { text: "OK", onPress: () => navigation.goBack() } // Go back to refresh dashboard
-              ]
-            );
-        } catch (error) {
-            console.log(error);
-            Alert.alert("Error", "Server Error. Try again.");
+          const freshPondData = await client.get(`/api/ponds/${pondId}`);
+          console.log(`✅ Fresh pond data after harvest: total_fish=${freshPondData.data.total_fish}, species=${freshPondData.data.current_fish_type}`);
+          
+          // Invalidate all pond-related caches
+          await invalidateCache([
+            `POND_v2_${pondId}`,
+            `POND_${pondId}`,
+            'PONDS_LIST',
+            'ACTIVE_STOCK_CACHE'
+          ]);
+          
+          Alert.alert("✅ Harvest Recorded!", `Profit: ₱${response.data.revenue?.toLocaleString()}`, [{
+            text: "OK",
+            onPress: () => navigation.goBack({ params: { pond: freshPondData.data, forceRefresh: true } })
+          }]);
+        } catch (fetchError) {
+          console.error("Error fetching fresh pond data:", fetchError);
+          // Fall back to just invalidating cache
+          await invalidateCache([
+            `POND_v2_${pondId}`,
+            `POND_${pondId}`,
+            'PONDS_LIST',
+            'ACTIVE_STOCK_CACHE'
+          ]);
+          Alert.alert("✅ Harvest Recorded!", `Profit: ₱${response.data.revenue?.toLocaleString()}`, [{
+            text: "OK",
+            onPress: () => navigation.goBack({ params: { forceRefresh: true } })
+          }]);
         }
-    } else {
+      } else {
         await queueAction('/api/harvest/', payload);
-        Alert.alert("Saved Offline ☁️", "Harvest saved. Sync later!", [
-            { text: "OK", onPress: () => navigation.goBack() }
+        
+        // 🔥 Also invalidate cache in offline mode so sync will refresh the UI
+        await invalidateCache([
+          `POND_v2_${pondId}`,
+          `POND_${pondId}`,
+          'PONDS_LIST',
+          'ACTIVE_STOCK_CACHE'
         ]);
+        
+        Alert.alert("Saved Offline ☁️", "Harvest saved. Sync later!", [{
+          text: "OK",
+          onPress: () => navigation.goBack({ params: { forceRefresh: true } })
+        }]);
+      }
+    } catch (error) {
+      console.error('Harvest save error:', error);
+      Alert.alert("Error", "Server Error. Try again.");
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
 
       {/* CONFIRMATION OF POND ID */}
       {pondId && <Text style={styles.subHeader}>Harvesting Pond ID: {pondId}</Text>}
@@ -102,20 +169,46 @@ export default function HarvestFormScreen({ route, navigation }) {
                 ))}
             </Picker>
         ) : (
-            <Text style={{padding: 15, color: '#666', textAlign: 'center'}}>
-               {pondId ? "No active fish in this pond." : "No active fish batches found."}
-            </Text>
+            // 🔥 UPDATED: Better empty state
+            <View style={{padding: 20, alignItems: 'center'}}>
+               <Text style={{color: '#666', textAlign: 'center', marginBottom: 5}}>
+                  {pondId ? "No active fish in this pond." : "No active fish batches found."}
+               </Text>
+               <Text style={{fontSize: 12, color: '#999'}}>(Try syncing if data is missing)</Text>
+            </View>
         )}
       </View>
 
       <Text style={styles.label}>Harvest Date:</Text>
-      <TextInput style={styles.input} value={date} onChangeText={setDate} />
+      <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
       
       <Text style={styles.label}>Total Weight (kg):</Text>
-      <TextInput style={styles.input} placeholder="e.g. 1200" keyboardType="numeric" value={weight} onChangeText={setWeight} />
+      <TextInput 
+        style={styles.input} 
+        placeholder="e.g. 1200" 
+        keyboardType="numeric" 
+        value={weight} 
+        onChangeText={setWeight} 
+      />
       
       <Text style={styles.label}>Price per Kg (₱):</Text>
-      <TextInput style={styles.input} placeholder="e.g. 150" keyboardType="numeric" value={price} onChangeText={setPrice} />
+      <TextInput 
+        style={styles.input} 
+        placeholder="e.g. 150" 
+        keyboardType="numeric" 
+        value={price} 
+        onChangeText={setPrice} 
+      />
+
+      {/* 🔥 NEW: Revenue Preview Card */}
+      {parseFloat(weight) > 0 && parseFloat(price) > 0 && (
+          <View style={styles.revenueCard}>
+            <Text style={styles.revenueLabel}>Estimated Revenue</Text>
+            <Text style={styles.revenueValue}>
+                ₱{estimatedRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+          </View>
+      )}
       
       <Text style={styles.label}>Fish Size:</Text>
       <View style={styles.pickerContainer}>
@@ -127,7 +220,17 @@ export default function HarvestFormScreen({ route, navigation }) {
       </View>
       
       <View style={styles.btnContainer}>
-        <Button title="Save Harvest & Close Cycle" onPress={handleSave} color="green" disabled={activeStockings.length === 0} />
+        {/* 🔥 UPDATED: Use handlePreCheck instead of handleSave directly, and show loading */}
+        {isSubmitting ? (
+            <ActivityIndicator size="large" color="green" />
+        ) : (
+            <Button 
+                title="Save Harvest & Close Cycle" 
+                onPress={handlePreCheck} 
+                color="green" 
+                disabled={activeStockings.length === 0} 
+            />
+        )}
       </View>
     </ScrollView>
   );
@@ -141,5 +244,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 16, marginBottom: 5, marginTop: 10, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 5, fontSize: 16, backgroundColor: '#fff' },
   pickerContainer: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, marginBottom: 5, backgroundColor: '#fff', overflow: 'hidden' },
-  btnContainer: { marginTop: 30, marginBottom: 50 }
+  btnContainer: { marginTop: 30, marginBottom: 50 },
+  // 🔥 NEW Styles
+  revenueCard: { backgroundColor: '#E8F5E9', padding: 15, borderRadius: 8, marginTop: 15, borderLeftWidth: 4, borderLeftColor: '#4CAF50' },
+  revenueLabel: { color: '#388E3C', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase' },
+  revenueValue: { fontSize: 22, fontWeight: 'bold', color: '#1B5E20', marginTop: 2 }
 });

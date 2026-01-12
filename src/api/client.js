@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid'; // Run: npm install uuid react-native-get-random-values
+import { v4 as uuidv4 } from 'uuid'; 
 
 const API_URL = 'https://aquapin-backend-igvj.onrender.com';
 
