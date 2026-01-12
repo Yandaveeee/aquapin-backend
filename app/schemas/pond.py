@@ -19,7 +19,10 @@ class PondResponse(PondCreate):
     # 2. ADD THIS FIELD (Crucial for status to work)
     last_stocked_at: Optional[date] = None
 
-    current_fish_type: Optional[str] = None 
+    current_fish_type: Optional[str] = None
+    
+    # 3. ADD THIS FIELD (Total active fish count from database)
+    total_fish: Optional[int] = 0 
 
     class Config:
         from_attributes = True
