@@ -1,8 +1,10 @@
+import logging
 import joblib
 import os
 from fastapi import APIRouter, HTTPException
 from app.schemas.prediction import PredictionInput, PredictionOutput
 
+logger = logging.getLogger("aquapin")
 router = APIRouter()
 
 # Load the model ONCE when the server starts
@@ -10,9 +12,9 @@ MODEL_PATH = "ml_engine/models/yield_predictor.pkl"
 
 try:
     model = joblib.load(MODEL_PATH)
-    print("✅ ML Model Loaded Successfully")
+    logger.info("ML Model Loaded Successfully")
 except Exception as e:
-    print(f"⚠️ Warning: Could not load model. Error: {e}")
+    logger.warning(f"Could not load ML model: {e}")
     model = None
 
 @router.post("/", response_model=PredictionOutput)
@@ -35,4 +37,5 @@ def predict_yield(data: PredictionInput):
             "estimated_revenue": round(revenue, 2)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Prediction failed: {e}")
+        raise HTTPException(status_code=500, detail="Prediction failed")

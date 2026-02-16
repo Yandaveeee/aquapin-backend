@@ -1,8 +1,11 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List, Dict
 import math
 from sqlalchemy import desc
+
+logger = logging.getLogger("aquapin")
 
 from app.db.connection import get_db
 from app.models.pond import Pond
@@ -61,7 +64,7 @@ def calculate_pond_aggregates(db: Session, pond_id: int) -> Dict:
             "current_fish_type": current_fish_type
         }
     except Exception as e:
-        print(f"Error calculating aggregates for pond {pond_id}: {e}")
+        logger.error(f"Error calculating aggregates for pond {pond_id}: {e}")
         return {"total_fish": 0, "current_fish_type": None}
 
 
@@ -144,8 +147,8 @@ def create_pond(
         return new_pond
 
     except Exception as e:
-        print(f"SERVER ERROR: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Pond creation error: {e}")
+        raise HTTPException(status_code=500, detail="Could not create pond")
 
 # 3. GET SINGLE POND (UPDATED: Now includes total_fish aggregates!)
 @router.get("/{pond_id}", response_model=PondResponse)

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List
@@ -8,6 +9,7 @@ from app.models.pond import Pond
 from app.schemas.stocking import StockingCreate, StockingResponse
 from datetime import datetime
 
+logger = logging.getLogger("aquapin")
 router = APIRouter()
 
 # --- GET ACTIVE BATCHES FOR A SPECIFIC POND ---
@@ -59,14 +61,14 @@ def get_pond_batches(
                     "status": "Ready" if days_in_pond >= 90 else "Growing" if days_in_pond >= 30 else "Young"
                 })
         
-        print(f"✅ Returning {len(results)} active batches for pond {pond_id}")
+        logger.info(f"Returning {len(results)} active batches for pond {pond_id}")
         return results
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        print(f"❌ BATCHES ERROR for pond {pond_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Batches error for pond {pond_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load batches")
 
 # --- GET ACTIVE STOCKINGS (Fixed for Loss Report) ---
 @router.get("/active")
@@ -111,8 +113,8 @@ def get_active_stockings(
         return results
 
     except Exception as e:
-        print(f"❌ STOCKING ERROR: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Active stockings error: {e}")
+        raise HTTPException(status_code=500, detail="Could not load active stockings")
 
 # --- CREATE STOCKING (Fixed: Removed invalid DB write) ---
 @router.post("/", response_model=StockingResponse)
@@ -142,5 +144,5 @@ def create_stocking_log(
     except HTTPException as he:
         raise he
     except Exception as e:
-        print(f"❌ CREATE ERROR: {e}")
+        logger.error(f"Stocking creation error: {e}")
         raise HTTPException(status_code=500, detail="Could not save stocking log")

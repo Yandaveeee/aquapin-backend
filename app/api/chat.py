@@ -1,8 +1,9 @@
 import os
 import io
+import logging
 from PIL import Image
 import google.generativeai as genai
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Header
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from app.db.connection import get_db
 from app.models.chat import ChatHistory 
 
 load_dotenv()
+logger = logging.getLogger("aquapin")
 router = APIRouter()
 
 # Response model
@@ -25,11 +27,11 @@ if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel(MODEL_NAME)
-        print(f"✅ AI Vision Ready. Connected to: {MODEL_NAME}")
+        logger.info(f"AI Vision Ready. Connected to: {MODEL_NAME}")
     except Exception as e:
-        print(f"⚠️ AI Configuration Error: {e}")
+        logger.warning(f"AI Configuration Error: {e}")
 else:
-    print("⚠️ NO API KEY FOUND.")
+    logger.warning("NO API KEY FOUND.")
 
 OFFLINE_KNOWLEDGE = {
     "green": "Green water indicates algae. Reduce feeding and turn on aerators.",
@@ -41,9 +43,14 @@ OFFLINE_KNOWLEDGE = {
 
 # --- NEW ROUTE: GET HISTORY ---
 @router.get("/history")
-def get_chat_history(db: Session = Depends(get_db)):
-    """Fetch the last 50 chat messages from the database."""
-    history = db.query(ChatHistory).order_by(ChatHistory.timestamp.asc()).limit(50).all()
+def get_chat_history(
+    db: Session = Depends(get_db),
+    x_user_id: str = Header(...)  # Security: Get user from header
+):
+    """Fetch the last 50 chat messages for the current user only."""
+    history = db.query(ChatHistory).filter(
+        ChatHistory.owner_id == x_user_id
+    ).order_by(ChatHistory.timestamp.asc()).limit(50).all()
     
     # Convert DB objects to JSON-friendly list
     return [
@@ -62,10 +69,12 @@ def get_chat_history(db: Session = Depends(get_db)):
 async def chat_with_aquabot(
     message: str = Form(...),           
     image: UploadFile = File(None),
-    db: Session = Depends(get_db) # <--- Inject Database Session
+    db: Session = Depends(get_db),  # Database session
+    x_user_id: str = Header(...)  # Security: User ID from header
 ):
     """
     Analyzes text AND optional image inputs, AND saves to database.
+    Saves messages only for the current user.
     """
     user_msg = message
     pil_image = None
@@ -77,17 +86,17 @@ async def chat_with_aquabot(
             contents = await image.read()
             pil_image = Image.open(io.BytesIO(contents))
             image_filename = image.filename # We save the filename to DB
-            print(f"📸 Image received: {image_filename}")
+            logger.info(f"Image received: {image_filename}")
         except Exception as e:
-            print(f"❌ Image processing failed: {e}")
+            logger.error(f"Image processing failed: {e}")
     
     # --- SAVE USER MESSAGE TO DB ---
     try:
-        user_record = ChatHistory(sender='user', message=user_msg, image_url=image_filename)
+        user_record = ChatHistory(owner_id=x_user_id, sender='user', message=user_msg, image_url=image_filename)
         db.add(user_record)
         db.commit() # Save now so it's safe
     except Exception as e:
-        print(f"⚠️ Database Error (User): {e}")
+        logger.error(f"Database Error saving user message: {e}")
 
     ai_response_text = ""
 
@@ -105,7 +114,7 @@ async def chat_with_aquabot(
             ai_response_text = response.text
             
         except Exception as e:
-            print(f"❌ AI ERROR: {e}")
+            logger.error(f"AI generation error: {e}")
             if "429" in str(e):
                 ai_response_text = "I am busy right now. Please ask in 10 seconds."
             else:
@@ -126,10 +135,10 @@ async def chat_with_aquabot(
 
     # --- SAVE BOT RESPONSE TO DB ---
     try:
-        bot_record = ChatHistory(sender='bot', message=ai_response_text)
+        bot_record = ChatHistory(owner_id=x_user_id, sender='bot', message=ai_response_text)
         db.add(bot_record)
         db.commit()
     except Exception as e:
-        print(f"⚠️ Database Error (Bot): {e}")
+        logger.error(f"Database Error saving bot message: {e}")
 
     return {"response": ai_response_text}

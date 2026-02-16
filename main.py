@@ -1,35 +1,58 @@
-from fastapi import FastAPI, Depends
+import os
+import logging
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from app.db.connection import engine, Base, get_db # <--- Base is imported here
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from dotenv import load_dotenv
+
+from app.db.connection import engine, Base, get_db
 
 # 1. IMPORT MODELS
-# This runs the __init__.py inside models/, which registers the tables to Base
 from app import models 
 
 # 2. IMPORT API ROUTERS
 from app.api import ponds, stocking, harvest, predictions, analytics, chat, mortality, history
 
-app = FastAPI(title="AquaPin API", version="1.0.0")
+# --- Logging ---
+logger = logging.getLogger("aquapin")
 
-# 3. ENABLE CORS
+# --- Load env ---
+load_dotenv()
+
+# --- Rate Limiter ---
+limiter = Limiter(key_func=get_remote_address)
+
+app = FastAPI(title="AquaPin API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# 3. ENABLE CORS (Restricted to known origins)
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
-# 4. DATABASE RESET (CRITICAL FOR PRIVACY UPDATE)
-# ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'
-
-# Uncomment the next line to WIPE the database (Run once, then comment out)
-# Base.metadata.drop_all(bind=engine)
+# 4. GLOBAL EXCEPTION HANDLER
+# Catches unhandled exceptions and returns a safe generic message
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred."}
+    )
 
 # 5. CREATE TABLES
-# ERROR FIX: Use 'Base.metadata', NOT 'models.Base.metadata'
 Base.metadata.create_all(bind=engine)
 
 @app.get("/")
@@ -42,7 +65,8 @@ def test_db_connection(db: Session = Depends(get_db)):
         result = db.execute(text("SELECT 1"))
         return {"status": "success", "db_connected": True}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Database connection test failed: {e}")
+        return {"status": "error", "message": "Database connection failed"}
 
 # 6. REGISTER ROUTERS
 app.include_router(ponds.router, prefix="/api/ponds", tags=["Ponds"])

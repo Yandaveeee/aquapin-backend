@@ -6,6 +6,7 @@ class ChatHistory(Base):
     __tablename__ = "chat_history"
 
     id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(String(50), nullable=False)  # User ID for privacy filtering
     sender = Column(String(10), nullable=False) # 'user' or 'bot'
     message = Column(Text, nullable=False)
     image_url = Column(String(255), nullable=True) # To save photo URLs
