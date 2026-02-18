@@ -31,16 +31,26 @@ app = FastAPI(title="AquaPin API", version="1.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# 3. ENABLE CORS (Restricted to known origins)
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
+# 3. ENABLE CORS
+# Allow all origins for now - tighten with ALLOWED_ORIGINS env var later
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = allowed_origins_env.split(",")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # 4. GLOBAL EXCEPTION HANDLER
 # Catches unhandled exceptions and returns a safe generic message
