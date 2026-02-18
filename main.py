@@ -52,8 +52,13 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred."}
     )
 
-# 5. CREATE TABLES
-Base.metadata.create_all(bind=engine)
+# 5. CREATE TABLES (Resilient)
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created successfully.")
+except Exception as e:
+    logger.error(f"CRITICAL: Database connection failed during startup: {e}")
+    # We continue startup so the /test-db endpoint can be reached for debugging
 
 @app.get("/")
 def read_root():
@@ -67,6 +72,14 @@ def test_db_connection(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Database connection test failed: {e}")
         return {"status": "error", "message": "Database connection failed"}
+
+@app.get("/init-db")
+def init_db():
+    try:
+        Base.metadata.create_all(bind=engine)
+        return {"status": "success", "message": "Tables created successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # 6. REGISTER ROUTERS
 app.include_router(ponds.router, prefix="/api/ponds", tags=["Ponds"])
