@@ -53,12 +53,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # 5. CREATE TABLES (Resilient)
-try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully.")
-except Exception as e:
-    logger.error(f"CRITICAL: Database connection failed during startup: {e}")
-    # We continue startup so the /test-db endpoint can be reached for debugging
+# try:
+#     Base.metadata.create_all(bind=engine)
+#     logger.info("Database tables created successfully.")
+# except Exception as e:
+#     logger.error(f"CRITICAL: Database connection failed during startup: {e}")
+#     # We continue startup so the /test-db endpoint can be reached for debugging
 
 @app.get("/")
 def read_root():
