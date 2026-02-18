@@ -9,4 +9,4 @@ dist/
 build/
 .DS_Store
 .env
-test_key.py
+test_key.pyaquapin.db
