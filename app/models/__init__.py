@@ -10,3 +10,4 @@ from .mortality import MortalityLog
 from .chat import ChatHistory
 
 # This file now correctly exposes all your tables to main.py
+from .user import User
